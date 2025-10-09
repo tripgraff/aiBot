@@ -15,6 +15,21 @@ import hashlib
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Загрузка переменных окружения из файла .env
+def load_env_file():
+    """Загружает переменные окружения из файла .env"""
+    env_path = Path('.env')
+    if env_path.exists():
+        with open(env_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key.strip()] = value.strip()
+
+# Загружаем переменные окружения
+load_env_file()
+
 # Получение токенов из переменных окружения
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 YANDEX_API_KEY = os.getenv('YANDEX_API_KEY')
@@ -429,9 +444,36 @@ def get_yandex_response(text, conversation_history=None):
         logging.error(f"Ошибка при запросе к Yandex API: {e}")
         return "Произошла ошибка при обработке запроса Yandex. Попробуйте позже."
 
-def get_groq_response(text, conversation_history=None, model="llama-3.1-70b-versatile"):
+def get_available_groq_models():
+    """Получение списка доступных моделей Groq"""
+    if not GROQ_API_KEY:
+        return []
+    
+    try:
+        url = 'https://api.groq.com/openai/v1/models'
+        headers = {
+            'Authorization': f'Bearer {GROQ_API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return [model['id'] for model in data.get('data', [])]
+        else:
+            logging.error(f"Ошибка получения моделей Groq: {response.status_code}")
+            return []
+    except Exception as e:
+        logging.error(f"Ошибка при получении моделей Groq: {e}")
+        return []
+
+def get_groq_response(text, conversation_history=None, model="llama-3.1-8b-instant"):
     """Получение ответа от Groq API с retry логикой (быстрые бесплатные модели)"""
     import time
+    
+    # Проверяем наличие API ключа
+    if not GROQ_API_KEY:
+        return "❌ API ключ Groq не настроен. Проверьте файл .env"
     
     try:
         url = 'https://api.groq.com/openai/v1/chat/completions'
@@ -467,7 +509,14 @@ def get_groq_response(text, conversation_history=None, model="llama-3.1-70b-vers
                 
                 if response.status_code == 200:
                     result = response.json()
-                    return result['choices'][0]['message']['content']
+                    content = result['choices'][0]['message']['content']
+                    
+                    # Удаляем теги <think> из ответов Qwen
+                    import re
+                    content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL | re.IGNORECASE)
+                    content = content.strip()
+                    
+                    return content
                 elif response.status_code in [503, 429, 500]:
                     # Временные ошибки - пробуем еще раз
                     logging.warning(f"Groq API временная ошибка {response.status_code}, повтор через {retry_delay}с...")
@@ -478,8 +527,26 @@ def get_groq_response(text, conversation_history=None, model="llama-3.1-70b-vers
                     else:
                         return f"⚠️ Groq API перегружен ({response.status_code}). Попробуйте другую модель или подождите минуту."
                 else:
-                    logging.error(f"Groq API ошибка {response.status_code}: {response.text}")
-                    return f"Ошибка Groq API ({response.status_code}). Попробуйте позже."
+                    error_text = response.text
+                    logging.error(f"Groq API ошибка {response.status_code}: {error_text}")
+                    
+                    # Детальная обработка ошибок
+                    if response.status_code == 400:
+                        try:
+                            error_data = response.json()
+                            if 'error' in error_data and 'message' in error_data['error']:
+                                return f"❌ Ошибка Groq API: {error_data['error']['message']}"
+                        except:
+                            pass
+                        return "❌ Неверный запрос к Groq API. Проверьте модель и параметры."
+                    elif response.status_code == 401:
+                        return "❌ Неверный API ключ Groq. Проверьте настройки."
+                    elif response.status_code == 403:
+                        return "❌ Доступ запрещен к Groq API. Проверьте права доступа."
+                    elif response.status_code == 404:
+                        return "❌ Модель не найдена в Groq API."
+                    else:
+                        return f"❌ Ошибка Groq API ({response.status_code}). Попробуйте позже."
             except requests.exceptions.Timeout:
                 logging.warning(f"Timeout при запросе к Groq API, повтор...")
                 if attempt < max_retries - 1:
@@ -492,6 +559,30 @@ def get_groq_response(text, conversation_history=None, model="llama-3.1-70b-vers
     except Exception as e:
         logging.error(f"Ошибка при запросе к Groq API: {e}")
         return "Произошла ошибка при обработке запроса Groq. Попробуйте позже."
+
+async def groq_models_command(update: Update, context):
+    """Команда для проверки доступных моделей Groq"""
+    user_id = update.effective_user.id
+    
+    # Проверяем права администратора
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("❌ Эта команда доступна только администраторам.")
+        return
+    
+    try:
+        models = get_available_groq_models()
+        if models:
+            models_text = "🤖 **Доступные модели Groq:**\n\n"
+            for model in sorted(models):
+                models_text += f"• `{model}`\n"
+            
+            models_text += f"\n📊 **Всего моделей:** {len(models)}"
+            await update.message.reply_text(models_text, parse_mode="Markdown")
+        else:
+            await update.message.reply_text("❌ Не удалось получить список моделей Groq. Проверьте API ключ.")
+    except Exception as e:
+        logging.error(f"Ошибка в команде groq_models: {e}")
+        await update.message.reply_text("❌ Ошибка при получении списка моделей.")
 
 def get_gemini_response(text, conversation_history=None, model="gemini-1.5-flash"):
     """Получение ответа от Google Gemini API (бесплатный)"""
@@ -982,29 +1073,27 @@ MODELS = {
         'function': lambda text, history: get_openrouter_response(text, history, "x-ai/grok-code-fast-1")
     },
     
-    # Meta Llama модели (через Groq)
-    'llama-3.3-70b': {
-        'name': 'Llama 3.3 70B',
-        'emoji': '🔥',
-        'description': 'Мощная модель Llama 3.3 70B',
-        'category': 'llama',
-        'function': lambda text, history: get_groq_response(text, history, "llama-3.3-70b-versatile")
-    },
+    # Groq модели - только актуальные
     'llama-3.1-8b': {
         'name': 'Llama 3.1 8B',
         'emoji': '🦙',
-        'description': 'Быстрая Llama 3.1 8B',
+        'description': 'Быстрая Llama 3.1 8B через Groq',
         'category': 'llama',
         'function': lambda text, history: get_groq_response(text, history, "llama-3.1-8b-instant")
     },
-    
-    # Google Gemma модель (через Groq)
-    'gemma-2-9b': {
-        'name': 'Gemma 2 9B',
-        'emoji': '💨',
-        'description': 'Быстрая Gemma 2 9B от Google',
-        'category': 'gemma',
-        'function': lambda text, history: get_groq_response(text, history, "gemma2-9b-it")
+    'gpt-oss-120b': {
+        'name': 'GPT OSS 120B',
+        'emoji': '🚀',
+        'description': 'Мощная модель GPT OSS 120B через Groq',
+        'category': 'gpt',
+        'function': lambda text, history: get_groq_response(text, history, "openai/gpt-oss-120b")
+    },
+    'qwen3-32b': {
+        'name': 'Qwen 3 32B',
+        'emoji': '🐉',
+        'description': 'Мощная модель Qwen 3 32B через Groq',
+        'category': 'qwen',
+        'function': lambda text, history: get_groq_response(text, history, "qwen/qwen3-32b")
     },
     
     # Yandex
@@ -2760,7 +2849,7 @@ async def handle_message(update: Update, context):
         except Exception as format_error:
             # Если форматирование не удалось, отправляем без форматирования
             logging.warning(f"Ошибка форматирования Markdown: {format_error}")
-            await update.message.reply_text(response)
+        await update.message.reply_text(response)
         
     except Exception as e:
         logging.error(f"Ошибка при обработке сообщения: {e}")
@@ -3273,6 +3362,9 @@ def main():
         app.add_handler(CommandHandler("leavegroup", leavegroup_command))
         app.add_handler(CommandHandler("groupinfo", groupinfo_command))
         app.add_handler(CommandHandler("invite", invite_command))
+        
+        # Команда для проверки доступных моделей Groq
+        app.add_handler(CommandHandler("groqmodels", groq_models_command))
         
         # Загружаем групповые чаты
         load_group_chats()
