@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.log
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.zip
+bot.log
+*.db
+*.sqlite
+
+# Environment variables (API keys)
+.env
+
+# User data (keep structure, ignore content)
+user_chats/*.json
+!user_chats/.gitkeep
+group_chats/*.json
+!group_chats/.gitkeep
+
+# Temporary files
+*.tmp
+*.bak
+*.old
