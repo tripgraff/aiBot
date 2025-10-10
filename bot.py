@@ -1,4 +1,4 @@
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from telegram.error import Conflict, NetworkError
 from telegram.request import HTTPXRequest
@@ -70,6 +70,11 @@ user_current_chat = {}
 
 # Хранилище всех чатов: {user_id: {chat_id: {...}, chat_id2: {...}}}
 user_all_chats = {}
+
+# Анти-спам защита
+user_message_times = {}  # {user_id: [timestamp1, timestamp2, ...]}
+user_warnings = {}  # {user_id: warning_count}
+user_blocked = {}  # {user_id: block_until_timestamp}
 
 # Хранилище состояния ожидания ID чата: {user_id: True/False}
 awaiting_chat_id = {}
@@ -227,6 +232,65 @@ def log_user_message(user_id, username, message_text, is_bot=False, model_id=Non
             
     except Exception as e:
         logging.error(f"Ошибка при логировании сообщения: {e}")
+
+# Анти-спам функции
+def check_spam(user_id):
+    """
+    Проверка на спам. Возвращает (is_spam, message)
+    
+    Лимиты:
+    - 20 сообщений в минуту
+    - При превышении: 3 предупреждения, затем блокировка на 5 минут
+    """
+    import time
+    current_time = time.time()
+    
+    # Проверяем блокировку
+    if user_id in user_blocked:
+        block_until = user_blocked[user_id]
+        if current_time < block_until:
+            remaining_time = int((block_until - current_time) / 60)
+            return True, f"🚫 **Вы заблокированы за спам!**\n\nПопробуйте снова через {remaining_time + 1} минут."
+        else:
+            # Блокировка истекла
+            del user_blocked[user_id]
+            user_warnings[user_id] = 0
+            user_message_times[user_id] = []
+    
+    # Инициализируем список времени сообщений
+    if user_id not in user_message_times:
+        user_message_times[user_id] = []
+    
+    # Удаляем старые метки времени (старше 1 минуты)
+    user_message_times[user_id] = [
+        t for t in user_message_times[user_id]
+        if current_time - t < 60
+    ]
+    
+    # Добавляем текущее время
+    user_message_times[user_id].append(current_time)
+    
+    # Проверяем лимит
+    message_count = len(user_message_times[user_id])
+    
+    if message_count > 20:
+        # Превышен лимит
+        if user_id not in user_warnings:
+            user_warnings[user_id] = 0
+        
+        user_warnings[user_id] += 1
+        
+        if user_warnings[user_id] >= 3:
+            # Блокируем на 5 минут
+            user_blocked[user_id] = current_time + 300  # 5 минут
+            logging.warning(f"Пользователь {user_id} заблокирован за спам на 5 минут")
+            return True, "🚫 **Вы заблокированы за спам на 5 минут!**\n\nСлишком много сообщений."
+        else:
+            # Предупреждение
+            warnings_left = 3 - user_warnings[user_id]
+            return True, f"⚠️ **Внимание! Слишком много сообщений.**\n\nЛимит: 20 сообщений в минуту.\n\nПредупреждений осталось: {warnings_left}\nПосле 3 предупреждений вы будете заблокированы на 5 минут."
+    
+    return False, None
 
 def update_user_info(user_id, username, first_name, last_name):
     """Обновление информации о пользователе"""
@@ -1109,7 +1173,7 @@ MODELS = {
 def get_main_keyboard():
     """Создает основную клавиатуру с командами"""
     keyboard = [
-        [KeyboardButton("🤖 Модели"), KeyboardButton("💬 Ваши чаты")],
+        [KeyboardButton("💬 Создать новый чат"), KeyboardButton("📂 Ваши чаты")],
         [KeyboardButton("👥 Группы"), KeyboardButton("📊 Статус")],
         [KeyboardButton("❓ Помощь")]
     ]
@@ -1117,8 +1181,12 @@ def get_main_keyboard():
 
 def get_chat_keyboard():
     """Создает клавиатуру для режима общения с ИИ"""
+    webapp_url = "https://xfusionai.netlify.app/"
     keyboard = [
-        [KeyboardButton("◀️ Главное меню")]
+        [
+            KeyboardButton("◀️ Главное меню"), 
+            KeyboardButton("🤖 Модели", web_app=WebAppInfo(url=webapp_url))
+    ]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -1519,7 +1587,7 @@ async def help_command(update: Update, context):
 🎮 **Кнопки меню:**
 💬 Создать новый чат - создать новый чат с ИИ
 📊 Статус - показать статус и статистику
-💬 Ваши чаты - список всех чатов (можно продолжить или удалить)
+📂 Ваши чаты - список всех чатов (можно продолжить или удалить)
 👥 Группы - создание и управление групповыми чатами
 ❓ Помощь - показать эту справку
 
@@ -1635,7 +1703,7 @@ async def my_chats_command(update: Update, context):
     non_empty_chats = {
         chat_id: chat_data 
         for chat_id, chat_data in user_chats.items() 
-        if chat_data.get('message_count', 0) > 0
+        if (chat_data.get('message_count', 0) > 0 or len(chat_data.get('messages', [])) > 0)
     }
     
     # Проверяем, есть ли непустые чаты
@@ -2272,7 +2340,6 @@ async def handle_message(update: Update, context):
     """Обработка текстовых сообщений и кнопок"""
     try:
         user_id = update.effective_user.id
-        user_text = update.message.text
         username = update.effective_user.username or "unknown"
         first_name = update.effective_user.first_name or "Unknown"
         last_name = update.effective_user.last_name or ""
@@ -2280,10 +2347,89 @@ async def handle_message(update: Update, context):
         # Обновляем информацию о пользователе
         update_user_info(user_id, username, first_name, last_name)
         
+        # Проверка на спам
+        is_spam, spam_message = check_spam(user_id)
+        if is_spam:
+            await update.message.reply_text(spam_message)
+            return
+        
+        # Обработка данных из веб-приложения
+        if update.message.web_app_data:
+            import json
+            try:
+                logging.info(f"Получены данные из веб-приложения: {update.message.web_app_data.data}")
+                data = json.loads(update.message.web_app_data.data)
+                model_id = data.get('model_id')
+                logging.info(f"Извлечен model_id: {model_id}")
+                
+                if model_id and model_id in MODELS:
+                    # Сохраняем выбранную модель
+                    user_models[user_id] = model_id
+                    model_info = MODELS[model_id]
+                    
+                    # Создаем чат с выбранной моделью
+                    keyboard = get_chat_keyboard()
+                    
+                    welcome_text = f"""✅ **Модель выбрана!**
+
+🤖 **{model_info['emoji']} {model_info['name']}**
+📝 **Описание:** {model_info['description']}
+
+💬 **Чат создан!** Начните писать сообщения - бот запомнит контекст!
+🔄 Хотите сменить модель? Нажмите "🤖 Модели" """
+                    
+                    await update.message.reply_text(
+                        welcome_text,
+                        reply_markup=keyboard
+                    )
+                    
+                    logging.info(f"Пользователь {user_id} выбрал модель {model_id} через веб-приложение")
+                    return
+                else:
+                    await update.message.reply_text("❌ Неверная модель. Попробуйте еще раз.")
+                    return
+            except Exception as e:
+                logging.error(f"Ошибка обработки web_app_data: {e}")
+                await update.message.reply_text("❌ Ошибка при выборе модели. Попробуйте еще раз.")
+                return
+        
+        user_text = update.message.text
         logging.info(f"Получено сообщение от пользователя {user_id}: {user_text[:50]}...")
         
         # Обработка кнопок меню
-        if user_text == "💬 Ваши чаты":
+        if user_text == "💬 Создать новый чат":
+            # Проверяем, есть ли у пользователя выбранная модель
+            if user_id in user_models:
+                # Если модель выбрана, сразу создаем чат
+                model_id = user_models[user_id]
+                model_info = MODELS[model_id]
+                
+                keyboard = get_chat_keyboard()
+                
+                welcome_text = f"""💬 **Новый чат создан!**
+
+🤖 **Модель:** {model_info['emoji']} {model_info['name']}
+📝 **Описание:** {model_info['description']}
+
+💡 Начните писать сообщения - бот запомнит контекст!
+🔄 Хотите сменить модель? Нажмите "🤖 Модели" """
+                
+                await update.message.reply_text(
+                    welcome_text,
+                    reply_markup=keyboard
+                )
+            else:
+                # Если модель не выбрана, показываем Reply кнопки с веб-приложением
+                chat_keyboard = get_chat_keyboard()
+                
+                await update.message.reply_text(
+                    "💬 **Чат готов к созданию!**\n\n"
+                    "⚠️ Сначала выберите модель через кнопку \"🤖 Модели\" ниже.\n\n"
+                    "После выбора модели чат будет автоматически создан!",
+                    reply_markup=chat_keyboard
+                )
+            return
+        elif user_text == "📂 Ваши чаты":
             # Удаляем все предыдущие служебные сообщения
             await delete_service_messages(context, update.effective_chat.id, user_id)
             await my_chats_command(update, context)
@@ -2540,7 +2686,44 @@ async def handle_message(update: Update, context):
                 else:
                     await update.message.reply_text("❌ Группа не найдена")
             else:
-                # Обычный выход в главное меню
+                # Обычный выход в главное меню (из чата с ИИ)
+                # Сохраняем чат, если есть сообщения
+                if user_id in user_conversations and len(user_conversations[user_id]) > 0:
+                    # Сохраняем чат в user_all_chats для "Мои чаты"
+                    import time
+                    chat_id = str(int(time.time()))
+                    
+                    if user_id not in user_all_chats:
+                        user_all_chats[user_id] = {}
+                    
+                    # Получаем название модели
+                    model_id = user_models.get(user_id, 'unknown')
+                    model_name = MODELS.get(model_id, {}).get('name', 'Unknown')
+                    
+                    user_all_chats[user_id][chat_id] = {
+                        'messages': user_conversations[user_id].copy(),
+                        'model': model_id,
+                        'created_at': chat_id,
+                        'title': f"{model_name} - {len(user_conversations[user_id])} сообщений",
+                        'message_count': len(user_conversations[user_id])
+                    }
+                    
+                    # Сохраняем в файл
+                    save_user_chats(user_id, username)
+                    logging.info(f"Чат {chat_id} сохранен для пользователя {user_id}")
+                    
+                    # Очищаем текущий чат
+                    del user_conversations[user_id]
+                    
+                    await update.message.reply_text(
+                        "💾 **Чат сохранен**\n\n"
+                        "Вы можете продолжить его позже через \"📂 Ваши чаты\""
+                    )
+                else:
+                    # Пустой чат не сохраняем
+                    if user_id in user_conversations:
+                        del user_conversations[user_id]
+                
                 keyboard = get_main_keyboard()
                 await update.message.reply_text("🏠 **Главное меню**", reply_markup=keyboard)
             return
@@ -2640,18 +2823,18 @@ async def handle_message(update: Update, context):
             await status_command(update, context)
             return
         elif user_text == "🤖 Модели":
-            # Показываем Reply кнопки с моделями
-            await delete_service_messages(context, update.effective_chat.id, user_id)
-            keyboard = get_models_keyboard(user_id)
-            sent_msg = await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text="🤖 **Выбор AI модели**\n\nВыберите модель для вашего чата:",
+            # Открываем веб-приложение для выбора модели
+            webapp_url = "https://xfusionai.netlify.app/"
+            
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🌐 Открыть выбор моделей", web_app=WebAppInfo(url=webapp_url))]
+            ])
+            
+            await update.message.reply_text(
+                "🤖 **Выбор AI модели**\n\n"
+                "Нажмите кнопку ниже, чтобы открыть веб-приложение с выбором моделей:",
                 reply_markup=keyboard
             )
-            # Сохраняем ID служебного сообщения
-            if user_id not in last_service_messages:
-                last_service_messages[user_id] = []
-            last_service_messages[user_id].append(sent_msg.message_id)
             return
         elif user_text == "❓ Помощь":
             # Удаляем все предыдущие служебные сообщения
@@ -2797,12 +2980,13 @@ async def handle_message(update: Update, context):
         # Обычное сообщение пользователя - общение с ИИ
         # Проверяем, выбрана ли модель
         if user_id not in user_models:
-            # Создаем Reply кнопки для выбора модели
-            keyboard = get_models_keyboard(user_id)
+            # Показываем Reply кнопки для выбора модели
+            chat_keyboard = get_chat_keyboard()
             
             await update.message.reply_text(
-                "⚠️ **Сначала выберите модель!**\n\nВыберите ИИ-модель для начала работы:",
-                reply_markup=keyboard
+                "⚠️ **Сначала выберите модель!**\n\n"
+                "Нажмите кнопку \"🤖 Модели\" внизу, чтобы выбрать ИИ-модель для начала работы.",
+                reply_markup=chat_keyboard
             )
             return
         
@@ -3369,6 +3553,14 @@ def main():
         # Загружаем групповые чаты
         load_group_chats()
         logging.info(f"📂 Загружено групповых чатов: {len(group_chats)}")
+        
+        # Создаем кастомный фильтр для веб-приложения
+        class WebAppFilter(filters.MessageFilter):
+            def filter(self, message):
+                return message.web_app_data is not None
+        
+        # Добавляем обработчик веб-приложения (ВАЖНО: ДО текстовых сообщений!)
+        app.add_handler(MessageHandler(WebAppFilter(), handle_message))
         
         # Добавляем обработчик текстовых сообщений (включая кнопки)
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

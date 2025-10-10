@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Выбор AI Модели</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            padding: 16px;
+            padding-bottom: 80px;
+        }
+
+        .header {
+            position: sticky;
+            top: 0;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            z-index: 100;
+            padding-bottom: 16px;
+            margin-bottom: 16px;
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .search-container {
+            margin-bottom: 12px;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid var(--tg-theme-hint-color, #999999);
+            border-radius: 12px;
+            font-size: 16px;
+            background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .filter-container {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding-bottom: 8px;
+            /* Скрываем скроллбар */
+            scrollbar-width: none; /* Firefox */
+            -ms-overflow-style: none; /* IE and Edge */
+        }
+        
+        .filter-container::-webkit-scrollbar {
+            display: none; /* Chrome, Safari, Opera */
+        }
+
+        .filter-btn {
+            padding: 8px 16px;
+            border: 1px solid var(--tg-theme-button-color, #0088cc);
+            border-radius: 20px;
+            background-color: transparent;
+            color: var(--tg-theme-button-color, #0088cc);
+            font-size: 14px;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-btn.active {
+            background-color: var(--tg-theme-button-color, #0088cc);
+            color: var(--tg-theme-button-text-color, #ffffff);
+        }
+        
+        .model-card.special {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: 2px solid #667eea;
+        }
+        
+        .model-card.special .model-name,
+        .model-card.special .model-description {
+            color: #ffffff;
+        }
+        
+        .model-card.special .model-creator {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .models-grid {
+            display: grid;
+            gap: 12px;
+        }
+
+        .model-card {
+            background-color: var(--tg-theme-secondary-bg-color, #f7f7f7);
+            border-radius: 16px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid rgba(128, 128, 128, 0.2);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .model-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+            border-color: rgba(128, 128, 128, 0.3);
+        }
+
+        .model-card.selected {
+            border-color: var(--tg-theme-button-color, #0088cc);
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            box-shadow: 0 4px 20px rgba(0, 136, 204, 0.3);
+        }
+
+        .model-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 8px;
+        }
+
+        .model-emoji {
+            font-size: 32px;
+        }
+
+        .model-info {
+            flex: 1;
+        }
+
+        .model-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--tg-theme-text-color, #000000);
+            margin-bottom: 4px;
+        }
+
+        .model-creator {
+            font-size: 12px;
+            color: var(--tg-theme-hint-color, #999999);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .model-description {
+            font-size: 14px;
+            color: var(--tg-theme-hint-color, #666666);
+            line-height: 1.5;
+            margin-top: 8px;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--tg-theme-hint-color, #999999);
+        }
+
+        .no-results-emoji {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .no-results-text {
+            font-size: 16px;
+        }
+
+        .select-btn {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 16px;
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            border-top: 1px solid var(--tg-theme-hint-color, #eeeeee);
+        }
+
+        .select-btn button {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 12px;
+            background-color: var(--tg-theme-button-color, #0088cc);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+
+        .select-btn button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .select-btn button:not(:disabled):active {
+            opacity: 0.8;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 Выбор AI Модели</h1>
+        
+        <div class="search-container">
+            <input type="text" class="search-input" id="searchInput" placeholder="🔍 Поиск моделей...">
+        </div>
+        
+        <div class="filter-container" id="filterContainer">
+            <button class="filter-btn active" data-filter="all">Все</button>
+        </div>
+    </div>
+
+    <div class="models-grid" id="modelsGrid"></div>
+
+    <div class="select-btn">
+        <button id="selectBtn" disabled>Выбрать модель</button>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        // Данные моделей (из bot.py) - ВСЕ модели
+        const models = {
+            // AUTO-SELECT
+            'auto-select': {
+                name: '🤖 Auto-Select',
+                emoji: '🎯',
+                description: 'Умный выбор лучшей модели для вашего запроса',
+                category: 'auto'
+            },
+            
+            // OpenAI GPT модели
+            'gpt-5': {
+                name: 'GPT 5',
+                emoji: '🌟',
+                description: 'Новейшая GPT-5 от OpenAI',
+                category: 'openai'
+            },
+            'gpt-5-nano': {
+                name: 'GPT 5 Nano',
+                emoji: '⚡',
+                description: 'Компактная версия GPT-5',
+                category: 'openai'
+            },
+            'gpt-4.1': {
+                name: 'GPT-4.1',
+                emoji: '🤖',
+                description: 'Улучшенная GPT-4',
+                category: 'openai'
+            },
+            'gpt-4.1-mini': {
+                name: 'GPT-4.1 Mini',
+                emoji: '⚙️',
+                description: 'Быстрая GPT-4.1 Mini',
+                category: 'openai'
+            },
+            'gpt-4o': {
+                name: 'GPT-4o',
+                emoji: '💫',
+                description: 'Оптимизированная GPT-4o',
+                category: 'openai'
+            },
+            'gpt-4o-mini': {
+                name: 'GPT-4o Mini',
+                emoji: '🔷',
+                description: 'Быстрая GPT-4o Mini',
+                category: 'openai'
+            },
+            'gpt-4-turbo': {
+                name: 'GPT-4 Turbo',
+                emoji: '💨',
+                description: 'Быстрая GPT-4 Turbo',
+                category: 'openai'
+            },
+            
+            // DeepSeek модели
+            'deepseek-r1': {
+                name: 'DeepSeek R1',
+                emoji: '🧠',
+                description: 'Reasoning модель от DeepSeek',
+                category: 'deepseek'
+            },
+            'deepseek-v3': {
+                name: 'DeepSeek V3',
+                emoji: '🔮',
+                description: 'Мощная модель DeepSeek V3',
+                category: 'deepseek'
+            },
+            
+            // Google Gemini модели
+            'gemini-2.5-pro': {
+                name: 'Gemini 2.5 Pro',
+                emoji: '💎',
+                description: 'Топовая Gemini с большим контекстом',
+                category: 'google'
+            },
+            'gemini-2.5-flash': {
+                name: 'Gemini 2.5 Flash',
+                emoji: '✨',
+                description: 'Быстрая Gemini 2.5 Flash',
+                category: 'google'
+            },
+            
+            // Qwen модели
+            'qwen-3': {
+                name: 'Qwen 3',
+                emoji: '🐉',
+                description: 'Мощная китайская модель Qwen 3',
+                category: 'qwen'
+            },
+            'qwen-3-thinking': {
+                name: 'Qwen 3 Thinking',
+                emoji: '🧩',
+                description: 'Reasoning версия Qwen 3',
+                category: 'qwen'
+            },
+            'qwen3-32b': {
+                name: 'Qwen 3 32B',
+                emoji: '🐉',
+                description: 'Мощная модель Qwen 3 32B через Groq',
+                category: 'qwen'
+            },
+            
+            // Anthropic Claude модели
+            'claude-4.5-sonnet': {
+                name: 'Claude 4.5 Sonnet',
+                emoji: '🎭',
+                description: 'Топовый Claude 4.5 Sonnet от Anthropic',
+                category: 'claude'
+            },
+            'claude-3.5-haiku': {
+                name: 'Claude 3.5 Haiku',
+                emoji: '🎨',
+                description: 'Быстрый Claude 3.5 Haiku',
+                category: 'claude'
+            },
+            
+            // xAI Grok модели
+            'grok-4': {
+                name: 'Grok 4',
+                emoji: '🚀',
+                description: 'Новейший Grok 4 от xAI',
+                category: 'grok'
+            },
+            'grok-3': {
+                name: 'Grok 3',
+                emoji: '🎯',
+                description: 'Grok 3 от Илона Маска',
+                category: 'grok'
+            },
+            'grok-4-fast': {
+                name: 'Grok 4 Fast',
+                emoji: '⚡',
+                description: 'Быстрый Grok 4 (2M контекст!)',
+                category: 'grok'
+            },
+            'grok-code-fast': {
+                name: 'Grok Code Fast',
+                emoji: '💻',
+                description: 'Grok для программирования',
+                category: 'grok'
+            },
+            
+            // Groq (быстрые модели)
+            'llama-3.1-8b': {
+                name: 'Llama 3.1 8B',
+                emoji: '🦙',
+                description: 'Быстрая Llama 3.1 8B через Groq',
+                category: 'groq'
+            },
+            'gpt-oss-120b': {
+                name: 'GPT OSS 120B',
+                emoji: '🚀',
+                description: 'Мощная модель GPT OSS 120B через Groq',
+                category: 'groq'
+            },
+            
+            // Yandex
+            'yandex-gpt': {
+                name: 'Yandex GPT',
+                emoji: '🟣',
+                description: 'Русский ИИ от Яндекса',
+                category: 'yandex'
+            }
+        };
+
+        const categories = {
+            all: 'Все',
+            openai: 'OpenAI',
+            deepseek: 'DeepSeek',
+            google: 'Google',
+            qwen: 'Qwen',
+            claude: 'Claude',
+            grok: 'Grok',
+            groq: 'Groq',
+            yandex: 'Yandex'
+        };
+
+        let selectedModel = null;
+        let currentFilter = 'all';
+        let searchQuery = '';
+
+        // Создаем фильтры
+        function createFilters() {
+            const filterContainer = document.getElementById('filterContainer');
+            filterContainer.innerHTML = '';
+            
+            for (const [key, value] of Object.entries(categories)) {
+                const btn = document.createElement('button');
+                btn.className = 'filter-btn' + (key === 'all' ? ' active' : '');
+                btn.dataset.filter = key;
+                btn.textContent = value;
+                btn.onclick = () => setFilter(key);
+                filterContainer.appendChild(btn);
+            }
+        }
+
+        // Устанавливаем фильтр
+        function setFilter(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.filter === filter);
+            });
+            renderModels();
+        }
+
+        // Отрисовываем модели
+        function renderModels() {
+            const grid = document.getElementById('modelsGrid');
+            grid.innerHTML = '';
+
+            const filteredModels = Object.entries(models).filter(([id, model]) => {
+                const matchesFilter = currentFilter === 'all' || model.category === currentFilter;
+                const matchesSearch = searchQuery === '' || 
+                    model.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    model.description.toLowerCase().includes(searchQuery.toLowerCase());
+                return matchesFilter && matchesSearch;
+            });
+
+            if (filteredModels.length === 0) {
+                grid.innerHTML = `
+                    <div class="no-results">
+                        <div class="no-results-emoji">😔</div>
+                        <div class="no-results-text">Модели не найдены</div>
+                    </div>
+                `;
+                return;
+            }
+
+            filteredModels.forEach(([id, model]) => {
+                const card = document.createElement('div');
+                card.className = 'model-card';
+                
+                // Добавляем специальный класс для Auto-Select
+                if (id === 'auto-select') {
+                    card.classList.add('special');
+                }
+                
+                if (selectedModel === id) {
+                    card.classList.add('selected');
+                }
+                
+                card.innerHTML = `
+                    <div class="model-header">
+                        <div class="model-emoji">${model.emoji}</div>
+                        <div class="model-info">
+                            <div class="model-name">${model.name}</div>
+                            <div class="model-creator">${categories[model.category]}</div>
+                        </div>
+                    </div>
+                    <div class="model-description">${model.description}</div>
+                `;
+                
+                card.onclick = () => selectModel(id);
+                grid.appendChild(card);
+            });
+        }
+
+        // Выбираем модель
+        function selectModel(modelId) {
+            selectedModel = modelId;
+            document.querySelectorAll('.model-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            event.currentTarget.classList.add('selected');
+            document.getElementById('selectBtn').disabled = false;
+            
+            // Добавляем вибрацию
+            if (tg.HapticFeedback) {
+                tg.HapticFeedback.impactOccurred('medium');
+            }
+        }
+
+        // Поиск
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            searchQuery = e.target.value;
+            renderModels();
+        });
+
+        // Кнопка выбора
+        document.getElementById('selectBtn').addEventListener('click', () => {
+            if (selectedModel) {
+                console.log('Выбрана модель:', selectedModel);
+                const data = JSON.stringify({ model_id: selectedModel });
+                console.log('Отправляем данные:', data);
+                tg.sendData(data);
+                console.log('Данные отправлены');
+            } else {
+                console.log('Модель не выбрана');
+            }
+        });
+
+        // Инициализация
+        createFilters();
+        renderModels();
+
+        // Настройка темы
+        document.body.style.setProperty('--tg-theme-bg-color', tg.themeParams.bg_color || '#ffffff');
+        document.body.style.setProperty('--tg-theme-text-color', tg.themeParams.text_color || '#000000');
+        document.body.style.setProperty('--tg-theme-hint-color', tg.themeParams.hint_color || '#999999');
+        document.body.style.setProperty('--tg-theme-button-color', tg.themeParams.button_color || '#0088cc');
+        document.body.style.setProperty('--tg-theme-button-text-color', tg.themeParams.button_text_color || '#ffffff');
+        document.body.style.setProperty('--tg-theme-secondary-bg-color', tg.themeParams.secondary_bg_color || '#f0f0f0');
+    </script>
+</body>
+</html>
+
