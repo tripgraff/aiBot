@@ -3501,7 +3501,7 @@ async def handle_message(update: Update, context):
         except Exception as format_error:
             # Если форматирование не удалось, отправляем без форматирования
             logging.warning(f"Ошибка форматирования Markdown: {format_error}")
-        await update.message.reply_text(response)
+            await update.message.reply_text(response)
         
         logging.info(f"handle_message завершена для пользователя {user_id}")
         
