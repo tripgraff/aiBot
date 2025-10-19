@@ -38,7 +38,6 @@ YANDEX_FOLDER_ID = os.getenv('YANDEX_FOLDER_ID')
 # API ключи для дополнительных моделей
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')  # Получи на https://console.groq.com
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', '')  # Получи на https://aistudio.google.com/app/apikey
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY', '')  # Получи на https://openrouter.ai/keys
 
 # ID администраторов (замени на свой Telegram ID)
 # Чтобы узнать свой ID, напиши боту @userinfobot
@@ -308,62 +307,77 @@ def update_user_info(user_id, username, first_name, last_name):
         user_info[user_id]["message_count"] += 1
 
 def format_ai_response(text):
-    """Улучшенное форматирование ответов от AI для Telegram"""
+    """Автоматическое форматирование ответов от всех AI моделей для Telegram"""
     import re
     
-    # Экранируем специальные символы Telegram Markdown V2 только вне блоков кода
-    def escape_markdown(text):
-        # Не трогаем текст внутри ``` блоков
-        parts = []
-        in_code_block = False
-        current = ""
-        
-        i = 0
-        while i < len(text):
-            if i + 2 < len(text) and text[i:i+3] == '```':
-                if current:
-                    if not in_code_block:
-                        # Экранируем обычный текст
-                        current = current.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]')
-                    parts.append(current)
-                    current = ""
-                parts.append('```')
-                in_code_block = not in_code_block
-                i += 3
-            elif i < len(text) and text[i] == '`':
-                if current:
-                    if not in_code_block:
-                        current = current.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]')
-                    parts.append(current)
-                    current = ""
-                # Находим закрывающий `
-                end = text.find('`', i + 1)
-                if end != -1:
-                    parts.append(text[i:end+1])
-                    i = end + 1
-                else:
-                    current += text[i]
-                    i += 1
-            else:
-                current += text[i]
-                i += 1
-        
-        if current:
-            if not in_code_block:
-                current = current.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]')
-            parts.append(current)
-        
-        return ''.join(parts)
+    if not text:
+        return text
     
     # Применяем форматирование
     formatted = text
     
-    # Улучшаем форматирование списков
-    formatted = re.sub(r'^(\d+)\.\s+', r'*\1\.* ', formatted, flags=re.MULTILINE)
-    formatted = re.sub(r'^[•·]\s+', r'• ', formatted, flags=re.MULTILINE)
+    # 1. Форматирование заголовков (# ## ###)
+    formatted = re.sub(r'^### (.+)$', r'*\1*', formatted, flags=re.MULTILINE)
+    formatted = re.sub(r'^## (.+)$', r'**\1**', formatted, flags=re.MULTILINE)
+    formatted = re.sub(r'^# (.+)$', r'**\1**', formatted, flags=re.MULTILINE)
     
-    # Добавляем разделители для лучшей читаемости
-    formatted = re.sub(r'\n\n\n+', r'\n\n', formatted)
+    # 2. Форматирование нумерованных списков
+    formatted = re.sub(r'^(\d+)\.\s+(.+)$', r'*\1.* \2', formatted, flags=re.MULTILINE)
+    
+    # 3. Форматирование маркированных списков
+    formatted = re.sub(r'^[•·\-\*]\s+(.+)$', r'• \1', formatted, flags=re.MULTILINE)
+    
+    # 4. Форматирование жирного текста (**текст** или __текст__)
+    formatted = re.sub(r'\*\*(.+?)\*\*', r'*\1*', formatted)
+    formatted = re.sub(r'__(.+?)__', r'*\1*', formatted)
+    
+    # 5. Форматирование курсива (*текст* или _текст_) - делаем жирным для Telegram
+    formatted = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'*\1*', formatted)
+    formatted = re.sub(r'(?<!_)_(?!_)(.+?)(?<!_)_(?!_)', r'*\1*', formatted)
+    
+    # 6. Форматирование inline кода (`код`)
+    formatted = re.sub(r'`([^`]+)`', r'`\1`', formatted)
+    
+    # 7. Форматирование блоков кода с языком (```python\nкод\n```)
+    formatted = re.sub(r'```(\w+)\n', r'```\n', formatted)
+    
+    # 8. Форматирование цитат (> текст)
+    formatted = re.sub(r'^>\s+(.+)$', r'_\1_', formatted, flags=re.MULTILINE)
+    
+    # 9. Удаляем лишние пустые строки (более 2 подряд)
+    formatted = re.sub(r'\n{3,}', r'\n\n', formatted)
+    
+    # 10. Добавляем разделитель перед заголовками
+    formatted = re.sub(r'\n(\*\*[^*]+\*\*)\n', r'\n\n\1\n', formatted)
+    
+    # 11. Улучшаем читаемость списков (добавляем отступы)
+    lines = formatted.split('\n')
+    result_lines = []
+    in_list = False
+    
+    for line in lines:
+        stripped = line.strip()
+        # Проверяем, начинается ли строка со списка
+        if stripped.startswith('•') or (stripped and stripped[0].isdigit() and '.' in stripped[:3]):
+            if not in_list and result_lines:
+                # Добавляем пустую строку перед началом списка
+                if result_lines[-1].strip():
+                    result_lines.append('')
+            in_list = True
+            result_lines.append(line)
+        else:
+            if in_list and stripped:
+                # Добавляем пустую строку после окончания списка
+                if result_lines[-1].strip():
+                    result_lines.append('')
+            in_list = False
+            result_lines.append(line)
+    
+    formatted = '\n'.join(result_lines)
+    
+    # 12. Финальная очистка
+    formatted = re.sub(r'\n{3,}', r'\n\n', formatted)
+    formatted = formatted.strip()
     
     return formatted
 
@@ -386,25 +400,31 @@ async def load_chat_by_id(user_id, username, chat_id_to_load):
     if 'completed_at' in chat_data:
         del chat_data['completed_at']
     
-    # Загружаем последние 40 сообщений в контекст
+    # Загружаем ВСЕ сообщения из чата
     messages = chat_data.get("messages", [])
     user_conversations[user_id] = []
     
-    # Берем последние 40 сообщений для контекста
-    for msg in messages[-40:]:
+    # Загружаем все сообщения
+    for msg in messages:
         role = msg.get("role", "user")
         text = msg.get("text", "")
         
         # Преобразуем в формат для AI
-        if role == "bot":
+        if role == "bot" or role == "assistant":
             user_conversations[user_id].append({'role': 'assistant', 'text': text})
         else:
             user_conversations[user_id].append({'role': 'user', 'text': text})
     
     # Устанавливаем модель из чата
-    model_id = chat_data.get("model_id")
+    model_id = chat_data.get("model") or chat_data.get("model_id")
     if model_id and model_id in MODELS:
         user_models[user_id] = model_id
+        
+        # Обрезаем историю по лимиту контекста модели
+        model_info = MODELS.get(model_id)
+        if model_info:
+            context_limit = model_info.get('context_limit', 128000)
+            user_conversations[user_id] = trim_conversation_to_limit(user_conversations[user_id], context_limit)
     
     # Сохраняем изменения (удаление completed_at)
     save_user_chats(user_id, username)
@@ -508,145 +528,8 @@ def get_yandex_response(text, conversation_history=None):
         logging.error(f"Ошибка при запросе к Yandex API: {e}")
         return "Произошла ошибка при обработке запроса Yandex. Попробуйте позже."
 
-def get_available_groq_models():
-    """Получение списка доступных моделей Groq"""
-    if not GROQ_API_KEY:
-        return []
-    
-    try:
-        url = 'https://api.groq.com/openai/v1/models'
-        headers = {
-            'Authorization': f'Bearer {GROQ_API_KEY}',
-            'Content-Type': 'application/json'
-        }
-        
-        response = requests.get(url, headers=headers, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            return [model['id'] for model in data.get('data', [])]
-        else:
-            logging.error(f"Ошибка получения моделей Groq: {response.status_code}")
-            return []
-    except Exception as e:
-        logging.error(f"Ошибка при получении моделей Groq: {e}")
-        return []
 
-def get_groq_response(text, conversation_history=None, model="llama-3.1-8b-instant"):
-    """Получение ответа от Groq API с retry логикой (быстрые бесплатные модели)"""
-    import time
-    
-    # Проверяем наличие API ключа
-    if not GROQ_API_KEY:
-        return "❌ API ключ Groq не настроен. Проверьте файл .env"
-    
-    try:
-        url = 'https://api.groq.com/openai/v1/chat/completions'
-        headers = {
-            'Authorization': f'Bearer {GROQ_API_KEY}',
-            'Content-Type': 'application/json'
-        }
-        
-        # Формируем историю сообщений в формате OpenAI
-        messages = []
-        if conversation_history:
-            for msg in conversation_history[-10:]:
-                role = 'assistant' if msg['role'] == 'assistant' else 'user'
-                messages.append({'role': role, 'content': msg['text']})
-        
-        messages.append({'role': 'user', 'content': text})
-        
-        data = {
-            'model': model,
-            'messages': messages,
-            'temperature': 0.7,
-            'max_tokens': 2000
-        }
-        
-        # Retry логика для обхода временных ошибок (503, 429, 500)
-        max_retries = 3
-        retry_delay = 1
-        
-        for attempt in range(max_retries):
-            try:
-                logging.info(f"Отправляем запрос к Groq API ({model}): {text[:50]}... [попытка {attempt + 1}/{max_retries}]")
-                response = requests.post(url, json=data, headers=headers, timeout=30)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    content = result['choices'][0]['message']['content']
-                    
-                    # Удаляем теги <think> из ответов Qwen
-                    import re
-                    content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL | re.IGNORECASE)
-                    content = content.strip()
-                    
-                    return content
-                elif response.status_code in [503, 429, 500]:
-                    # Временные ошибки - пробуем еще раз
-                    logging.warning(f"Groq API временная ошибка {response.status_code}, повтор через {retry_delay}с...")
-                    if attempt < max_retries - 1:
-                        time.sleep(retry_delay)
-                        retry_delay *= 2  # Экспоненциальная задержка
-                        continue
-                    else:
-                        return f"⚠️ Groq API перегружен ({response.status_code}). Попробуйте другую модель или подождите минуту."
-                else:
-                    error_text = response.text
-                    logging.error(f"Groq API ошибка {response.status_code}: {error_text}")
-                    
-                    # Детальная обработка ошибок
-                    if response.status_code == 400:
-                        try:
-                            error_data = response.json()
-                            if 'error' in error_data and 'message' in error_data['error']:
-                                return f"❌ Ошибка Groq API: {error_data['error']['message']}"
-                        except:
-                            pass
-                        return "❌ Неверный запрос к Groq API. Проверьте модель и параметры."
-                    elif response.status_code == 401:
-                        return "❌ Неверный API ключ Groq. Проверьте настройки."
-                    elif response.status_code == 403:
-                        return "❌ Доступ запрещен к Groq API. Проверьте права доступа."
-                    elif response.status_code == 404:
-                        return "❌ Модель не найдена в Groq API."
-                    else:
-                        return f"❌ Ошибка Groq API ({response.status_code}). Попробуйте позже."
-            except requests.exceptions.Timeout:
-                logging.warning(f"Timeout при запросе к Groq API, повтор...")
-                if attempt < max_retries - 1:
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
-                    continue
-                else:
-                    return "⚠️ Groq API не отвечает. Попробуйте другую модель."
-            
-    except Exception as e:
-        logging.error(f"Ошибка при запросе к Groq API: {e}")
-        return "Произошла ошибка при обработке запроса Groq. Попробуйте позже."
 
-async def groq_models_command(update: Update, context):
-    """Команда для проверки доступных моделей Groq"""
-    user_id = update.effective_user.id
-    
-    # Проверяем права администратора
-    if user_id not in ADMIN_IDS:
-        await update.message.reply_text("❌ Эта команда доступна только администраторам.")
-        return
-    
-    try:
-        models = get_available_groq_models()
-        if models:
-            models_text = "🤖 **Доступные модели Groq:**\n\n"
-            for model in sorted(models):
-                models_text += f"• `{model}`\n"
-            
-            models_text += f"\n📊 **Всего моделей:** {len(models)}"
-            await update.message.reply_text(models_text, parse_mode="Markdown")
-        else:
-            await update.message.reply_text("❌ Не удалось получить список моделей Groq. Проверьте API ключ.")
-    except Exception as e:
-        logging.error(f"Ошибка в команде groq_models: {e}")
-        await update.message.reply_text("❌ Ошибка при получении списка моделей.")
 
 def get_gemini_response(text, conversation_history=None, model="gemini-1.5-flash"):
     """Получение ответа от Google Gemini API (бесплатный)"""
@@ -687,6 +570,8 @@ def get_gemini_response(text, conversation_history=None, model="gemini-1.5-flash
     except Exception as e:
         logging.error(f"Ошибка при запросе к Gemini API: {e}")
         return "Произошла ошибка при обработке запроса Gemini. Попробуйте позже."
+
+
 
 def get_openrouter_response(text, conversation_history=None, model="openai/gpt-3.5-turbo"):
     """Получение ответа от OpenRouter API (доступ к множеству моделей)"""
@@ -762,249 +647,576 @@ def auto_select_model(text, conversation_history=None):
     
     # Определяем тип запроса и выбираем лучшую модель
     
-    # 1. КОД И ПРОГРАММИРОВАНИЕ (максимальное покрытие)
+    # 1. КОД И ПРОГРАММИРОВАНИЕ
     code_keywords = [
         # Языки программирования
         'код', 'code', 'python', 'javascript', 'typescript', 'java', 'c++', 'c#', 'csharp', 'ruby', 
         'php', 'go', 'golang', 'rust', 'kotlin', 'swift', 'scala', 'dart', 'r', 'matlab', 'perl',
+        'haskell', 'erlang', 'elixir', 'clojure', 'lua', 'bash', 'shell', 'powershell', 'assembly',
+        'fortran', 'cobol', 'pascal', 'delphi', 'vb', 'visual basic', 'lisp', 'scheme', 'prolog',
+        'nim', 'zig', 'crystal', 'solidity', 'vyper', 'move', 'cairo', 'ocaml', 'fsharp', 'julia',
         # Веб-технологии
         'html', 'css', 'sass', 'scss', 'react', 'vue', 'angular', 'node', 'nodejs', 'express',
-        'django', 'flask', 'fastapi', 'spring', 'nextjs', 'nuxt', 'svelte', 'jquery',
+        'django', 'flask', 'fastapi', 'spring', 'nextjs', 'nuxt', 'svelte', 'jquery', 'bootstrap',
+        'tailwind', 'material-ui', 'ant design', 'chakra', 'shadcn', 'astro', 'remix', 'solidjs',
+        'qwik', 'preact', 'lit', 'ember', 'backbone', 'meteor', 'nest', 'koa', 'hapi', 'sails',
+        'strapi', 'gatsby', 'eleventy', '11ty', 'hugo', 'jekyll', 'vite', 'parcel', 'rollup',
+        'turbopack', 'esbuild', 'babel', 'typescript compiler', 'tsc', 'webpack', 'css modules',
+        'styled-components', 'emotion', 'less', 'stylus', 'postcss', 'pwa', 'web components',
         # Базы данных
         'sql', 'mysql', 'postgresql', 'postgres', 'mongodb', 'redis', 'sqlite', 'database',
-        'nosql', 'orm', 'query', 'запрос', 'таблица', 'table',
+        'nosql', 'orm', 'query', 'запрос', 'таблица', 'table', 'база данных', 'бд', 'db',
+        'mariadb', 'oracle', 'mssql', 'sql server', 'cassandra', 'dynamodb', 'couchdb', 'neo4j',
+        'firebase', 'supabase', 'prisma', 'typeorm', 'sequelize', 'mongoose', 'knex', 'drizzle',
+        'clickhouse', 'elasticsearch', 'solr', 'memcached', 'etcd', 'cockroachdb', 'yugabyte',
+        'timescaledb', 'influxdb', 'prometheus', 'graphite', 'fauna', 'planetscale', 'neon',
         # Разработка
         'программ', 'функция', 'function', 'class', 'метод', 'method', 'переменная', 'variable',
-        'массив', 'array', 'объект', 'object', 'json', 'xml', 'api', 'rest', 'graphql',
+        'массив', 'array', 'объект', 'object', 'json', 'xml', 'api', 'rest', 'graphql', 'grpc',
         'debug', 'отладка', 'ошибка', 'error', 'exception', 'баг', 'bug', 'тест', 'test',
-        'юнит-тест', 'unittest', 'pytest', 'jest',
-        # Инструменты
-        'git', 'github', 'gitlab', 'docker', 'kubernetes', 'ci/cd', 'jenkins', 'webpack',
-        'npm', 'yarn', 'pip', 'composer', 'maven', 'gradle',
-        # Алгоритмы
+        'юнит-тест', 'unittest', 'pytest', 'jest', 'vitest', 'mocha', 'chai', 'jasmine',
+        'cypress', 'playwright', 'selenium', 'puppeteer', 'testing library', 'enzyme',
+        'debugging', 'breakpoint', 'watch', 'stack trace', 'трейс', 'логирование', 'logging',
+        'const', 'let', 'var', 'async', 'await', 'promise', 'callback', 'closure', 'замыкание',
+        'прототип', 'prototype', 'наследование', 'inheritance', 'полиморфизм', 'polymorphism',
+        'инкапсуляция', 'encapsulation', 'интерфейс', 'interface', 'абстракция', 'abstraction',
+        'generic', 'дженерик', 'шаблон', 'template', 'декоратор', 'decorator', 'аннотация',
+        'enum', 'перечисление', 'struct', 'структура', 'union', 'tuple', 'кортеж', 'список', 'list',
+        'словарь', 'dictionary', 'map', 'set', 'множество', 'hash', 'хэш', 'pointer', 'указатель',
+        # API и протоколы
+        'webhook', 'websocket', 'sse', 'server-sent events', 'http', 'https', 'tcp', 'udp',
+        'soap', 'ajax', 'fetch', 'axios', 'curl', 'postman', 'insomnia', 'swagger', 'openapi',
+        'cors', 'csrf', 'jwt', 'oauth', 'auth', 'authentication', 'authorization', 'авторизация',
+        'аутентификация', 'токен', 'token', 'session', 'сессия', 'cookie', 'куки', 'bearer',
+        # Инструменты разработки
+        'git', 'github', 'gitlab', 'bitbucket', 'docker', 'kubernetes', 'k8s', 'ci/cd', 'jenkins',
+        'npm', 'yarn', 'pnpm', 'bun', 'pip', 'poetry', 'pipenv', 'composer', 'maven', 'gradle',
+        'cargo', 'go mod', 'bundler', 'rubygems', 'nuget', 'cocoapods', 'carthage', 'spm',
+        'ansible', 'terraform', 'vagrant', 'helm', 'istio', 'prometheus', 'grafana', 'datadog',
+        'sentry', 'new relic', 'splunk', 'elk', 'logstash', 'kibana', 'jaeger', 'opentelemetry',
+        'nginx', 'apache', 'caddy', 'traefik', 'haproxy', 'load balancer', 'балансировщик',
+        'cloudflare', 'aws', 'azure', 'gcp', 'heroku', 'vercel', 'netlify', 'railway', 'render',
+        'digital ocean', 'linode', 'vultr', 'hetzner', 'fly.io', 'railway', 'deno deploy',
+        # Алгоритмы и структуры данных
         'алгоритм', 'algorithm', 'сортировка', 'sorting', 'поиск', 'search', 'рекурсия',
         'recursion', 'структура данных', 'data structure', 'дерево', 'tree', 'граф', 'graph',
-        # Паттерны и архитектура
-        'паттерн', 'pattern', 'mvc', 'mvvm', 'singleton', 'factory', 'observer', 'архитектура',
-        'architecture', 'микросервис', 'microservice', 'monolith',
+        'binary tree', 'бинарное дерево', 'heap', 'куча', 'приоритетная очередь', 'priority queue',
+        'linked list', 'связный список', 'stack', 'стек', 'queue', 'очередь', 'deque', 'дек',
+        'hash table', 'хэш-таблица', 'trie', 'префиксное дерево', 'b-tree', 'red-black tree',
+        'avl tree', 'graph traversal', 'обход графа', 'dfs', 'bfs', 'dijkstra', 'дейкстра',
+        'floyd', 'floyd-warshall', 'bellman-ford', 'prim', 'kruskal', 'topological sort',
+        'динамическое программирование', 'dynamic programming', 'dp', 'жадный алгоритм', 'greedy',
+        'divide and conquer', 'разделяй и властвуй', 'backtracking', 'метод ветвей и границ',
+        'big o', 'временная сложность', 'time complexity', 'пространственная сложность',
+        'space complexity', 'o(n)', 'o(log n)', 'o(n²)', 'амортизированная сложность',
+        # Паттерны проектирования
+        'паттерн', 'pattern', 'design pattern', 'mvc', 'mvvm', 'mvp', 'singleton', 'factory',
+        'abstract factory', 'builder', 'prototype', 'adapter', 'bridge', 'composite', 'decorator',
+        'facade', 'flyweight', 'proxy', 'chain of responsibility', 'command', 'iterator',
+        'mediator', 'memento', 'observer', 'state', 'strategy', 'template method', 'visitor',
+        'dependency injection', 'инверсия зависимостей', 'ioc', 'solid', 'dry', 'kiss', 'yagni',
+        'архитектура', 'architecture', 'микросервис', 'microservice', 'monolith', 'монолит',
+        'event-driven', 'событийная архитектура', 'cqrs', 'event sourcing', 'saga', 'hexagonal',
+        'clean architecture', 'чистая архитектура', 'domain-driven design', 'ddd', 'onion',
+        # Мобильная разработка
+        'android', 'ios', 'react native', 'flutter', 'xamarin', 'ionic', 'cordova', 'capacitor',
+        'swiftui', 'jetpack compose', 'kotlin multiplatform', 'kmm', 'expo', 'react native',
         # Прочее
-        'синтаксис', 'syntax', 'компиляция', 'compile', 'интерпрет', 'interpreter',
-        'рефакторинг', 'refactor', 'оптимизация кода', 'code optimization'
+        'синтаксис', 'syntax', 'компиляция', 'compile', 'интерпрет', 'interpreter', 'jit',
+        'рефакторинг', 'refactor', 'оптимизация кода', 'code optimization', 'профилирование',
+        'profiling', 'benchmark', 'бенчмарк', 'performance', 'производительность', 'memory leak',
+        'утечка памяти', 'garbage collection', 'сборщик мусора', 'concurrency', 'параллелизм',
+        'многопоточность', 'multithreading', 'async', 'асинхронность', 'race condition',
+        'deadlock', 'мьютекс', 'mutex', 'semaphore', 'семафор', 'lock', 'блокировка',
+        'ide', 'vscode', 'intellij', 'pycharm', 'webstorm', 'sublime', 'atom', 'vim', 'neovim',
+        'emacs', 'code review', 'ревью кода', 'pull request', 'merge request', 'commit', 'коммит',
+        'branch', 'ветка', 'merge', 'rebase', 'cherry-pick', 'stash', 'blame', 'diff', 'patch'
     ]
     if any(keyword in text_lower for keyword in code_keywords):
-        selected_model = 'grok-code-fast'
+        # Используем Grok Code Fast для программирования
         selected_name = 'Grok Code Fast'
         response = get_openrouter_response(text, conversation_history, "x-ai/grok-code-fast-1")
         return f"🤖 *Auto\\-Select:* {selected_name} 💻\n\n{response}"
     
     # 2. МАТЕМАТИКА, ЛОГИКА И СЛОЖНЫЕ РАССУЖДЕНИЯ
     reasoning_keywords = [
-        # Математика
+        # Математика - базовая
         'математика', 'math', 'арифметика', 'arithmetic', 'алгебра', 'algebra', 'геометрия',
         'geometry', 'тригонометрия', 'trigonometry', 'calculus', 'исчисление', 'интеграл',
         'integral', 'производная', 'derivative', 'уравнение', 'equation', 'формула', 'formula',
-        'теорема', 'theorem', 'доказательство', 'proof',
+        'теорема', 'theorem', 'доказательство', 'proof', 'лемма', 'lemma', 'аксиома', 'axiom',
         # Вычисления
         'вычисли', 'calculate', 'посчитай', 'compute', 'реши', 'solve', 'найди корни',
-        'roots', 'система уравнений', 'equations system',
-        # Логика и рассуждения
+        'roots', 'система уравнений', 'equations system', 'решить уравнение', 'solve equation',
+        'упрости', 'simplify', 'разложи', 'factor', 'разложение', 'factorization',
+        'вычислить', 'compute', 'подсчитать', 'count', 'сумма', 'sum', 'произведение', 'product',
+        # Высшая математика
+        'линейная алгебра', 'linear algebra', 'матрица', 'matrix', 'вектор', 'vector',
+        'определитель', 'determinant', 'собственные значения', 'eigenvalues', 'собственные векторы',
+        'eigenvectors', 'базис', 'basis', 'ранг', 'rank', 'ядро', 'kernel', 'образ', 'image',
+        'скалярное произведение', 'dot product', 'векторное произведение', 'cross product',
+        'норма', 'norm', 'ортогональность', 'orthogonality', 'ортонормированный', 'orthonormal',
+        # Математический анализ
+        'предел', 'limit', 'непрерывность', 'continuity', 'дифференциал', 'differential',
+        'частная производная', 'partial derivative', 'градиент', 'gradient', 'дивергенция',
+        'divergence', 'ротор', 'curl', 'лапласиан', 'laplacian', 'интегрирование', 'integration',
+        'двойной интеграл', 'double integral', 'тройной интеграл', 'triple integral',
+        'криволинейный интеграл', 'line integral', 'поверхностный интеграл', 'surface integral',
+        'ряд', 'series', 'последовательность', 'sequence', 'сходимость', 'convergence',
+        'расходимость', 'divergence', 'степенной ряд', 'power series', 'ряд тейлора', 'taylor series',
+        'ряд фурье', 'fourier series', 'преобразование фурье', 'fourier transform',
+        'преобразование лапласа', 'laplace transform', 'комплексные числа', 'complex numbers',
+        # Дифференциальные уравнения
+        'дифференциальное уравнение', 'differential equation', 'odu', 'оду', 'обыкновенное',
+        'pde', 'уравнение в частных производных', 'partial differential equation',
+        'начальные условия', 'initial conditions', 'граничные условия', 'boundary conditions',
+        # Дискретная математика
+        'дискретная математика', 'discrete math', 'комбинаторика', 'combinatorics',
+        'перестановки', 'permutations', 'сочетания', 'combinations', 'размещения', 'arrangements',
+        'биномиальные коэффициенты', 'binomial coefficients', 'треугольник паскаля', 'pascal triangle',
+        'принцип включений-исключений', 'inclusion-exclusion principle', 'производящие функции',
+        'generating functions', 'рекуррентные соотношения', 'recurrence relations',
+        'теория чисел', 'number theory', 'простые числа', 'prime numbers', 'делимость', 'divisibility',
+        'нод', 'gcd', 'greatest common divisor', 'нок', 'lcm', 'least common multiple',
+        'модульная арифметика', 'modular arithmetic', 'сравнения', 'congruences', 'малая теорема ферма',
+        'fermat little theorem', 'китайская теорема об остатках', 'chinese remainder theorem',
+        # Теория вероятностей
+        'вероятность', 'probability', 'случайная величина', 'random variable', 'распределение',
+        'distribution', 'математическое ожидание', 'expected value', 'expectation', 'дисперсия',
+        'variance', 'среднее квадратичное отклонение', 'standard deviation', 'ско', 'std',
+        'ковариация', 'covariance', 'корреляция', 'correlation', 'независимость', 'independence',
+        'условная вероятность', 'conditional probability', 'формула байеса', 'bayes theorem',
+        'закон больших чисел', 'law of large numbers', 'центральная предельная теорема',
+        'central limit theorem', 'нормальное распределение', 'normal distribution', 'гаусс', 'gaussian',
+        'биномиальное распределение', 'binomial distribution', 'пуассона', 'poisson distribution',
+        'экспоненциальное', 'exponential distribution', 'равномерное', 'uniform distribution',
+        'геометрическое', 'geometric distribution', 'гипергеометрическое', 'hypergeometric',
+        # Статистика
+        'статистика', 'statistics', 'выборка', 'sample', 'генеральная совокупность', 'population',
+        'среднее', 'mean', 'медиана', 'median', 'мода', 'mode', 'квартиль', 'quartile',
+        'перцентиль', 'percentile', 'гистограмма', 'histogram', 'box plot', 'ящик с усами',
+        'доверительный интервал', 'confidence interval', 'уровень значимости', 'significance level',
+        'p-value', 'p-значение', 'гипотеза', 'hypothesis', 'нулевая гипотеза', 'null hypothesis',
+        'альтернативная гипотеза', 'alternative hypothesis', 'критерий', 'test', 't-test',
+        'хи-квадрат', 'chi-square', 'anova', 'дисперсионный анализ', 'регрессия', 'regression',
+        'линейная регрессия', 'linear regression', 'множественная регрессия', 'multiple regression',
+        'логистическая регрессия', 'logistic regression', 'коэффициент детерминации', 'r-squared',
+        # Логика
         'логика', 'logic', 'доказать', 'prove', 'reasoning', 'рассужд', 'рассмотр',
-        'силлогизм', 'syllogism', 'дедукция', 'deduction', 'индукция', 'induction',
-        # Анализ
+        'силлогизм', 'syllogism', 'дедукция', 'deduction', 'индукция', 'induction', 'абдукция',
+        'высказывание', 'proposition', 'предикат', 'predicate', 'квантор', 'quantifier',
+        'конъюнкция', 'conjunction', 'дизъюнкция', 'disjunction', 'импликация', 'implication',
+        'эквивалентность', 'equivalence', 'отрицание', 'negation', 'тавтология', 'tautology',
+        'противоречие', 'contradiction', 'выполнимость', 'satisfiability', 'булева алгебра',
+        'boolean algebra', 'логические операции', 'logical operations', 'истинность', 'truth',
+        'ложность', 'false', 'таблица истинности', 'truth table', 'логический вывод', 'inference',
+        # Анализ и рассуждения
         'анализ', 'analysis', 'синтез', 'synthesis', 'почему', 'why', 'как так', 'how come',
-        'объясни', 'explain', 'причина', 'reason', 'следствие', 'consequence',
-        # Задачи
+        'объясни', 'explain', 'причина', 'reason', 'следствие', 'consequence', 'вывод', 'conclusion',
+        'предпосылка', 'premise', 'аргумент', 'argument', 'критическое мышление', 'critical thinking',
+        'рассуждение', 'reasoning', 'умозаключение', 'inference', 'анализировать', 'analyze',
+        'сравнить', 'compare', 'сопоставить', 'contrast', 'оценить', 'evaluate', 'интерпретировать',
+        # Задачи и головоломки
         'задача', 'problem', 'решение', 'solution', 'ответ на задачу', 'word problem',
-        'головоломка', 'puzzle', 'загадка', 'riddle',
-        # Статистика и вероятность
-        'статистика', 'statistics', 'вероятность', 'probability', 'распределение',
-        'distribution', 'корреляция', 'correlation', 'регрессия', 'regression',
-        # Физика и науки
-        'физика', 'physics', 'механика', 'mechanics', 'термодинамика', 'thermodynamics',
-        'квантовая', 'quantum', 'теория относительности', 'relativity'
+        'головоломка', 'puzzle', 'загадка', 'riddle', 'логическая задача', 'logic puzzle',
+        'математическая задача', 'math problem', 'олимпиадная задача', 'olympiad problem',
+        'задача на логику', 'logic problem', 'задача на смекалку', 'brain teaser',
+        # Оптимизация
+        'оптимизация', 'optimization', 'линейное программирование', 'linear programming',
+        'симплекс-метод', 'simplex method', 'целочисленное программирование', 'integer programming',
+        'динамическое программирование', 'dynamic programming', 'жадный алгоритм', 'greedy algorithm',
+        'градиентный спуск', 'gradient descent', 'метод ньютона', 'newton method',
+        'лагранжиан', 'lagrangian', 'множители лагранжа', 'lagrange multipliers',
+        'условная оптимизация', 'constrained optimization', 'выпуклая оптимизация', 'convex optimization',
+        # Физика
+        'физика', 'physics', 'механика', 'mechanics', 'кинематика', 'kinematics', 'динамика', 'dynamics',
+        'статика', 'statics', 'сила', 'force', 'ускорение', 'acceleration', 'скорость', 'velocity',
+        'импульс', 'momentum', 'энергия', 'energy', 'работа', 'work', 'мощность', 'power',
+        'закон ньютона', 'newton law', 'закон сохранения', 'conservation law', 'момент инерции',
+        'moment of inertia', 'момент силы', 'torque', 'колебания', 'oscillations', 'волны', 'waves',
+        'термодинамика', 'thermodynamics', 'энтропия', 'entropy', 'теплоёмкость', 'heat capacity',
+        'первое начало термодинамики', 'first law of thermodynamics', 'второе начало', 'second law',
+        'электричество', 'electricity', 'магнетизм', 'magnetism', 'электромагнетизм', 'electromagnetism',
+        'закон кулона', 'coulomb law', 'закон ома', 'ohm law', 'уравнения максвелла', 'maxwell equations',
+        'квантовая', 'quantum', 'квантовая механика', 'quantum mechanics', 'волновая функция', 'wave function',
+        'принцип неопределённости', 'uncertainty principle', 'уравнение шрёдингера', 'schrodinger equation',
+        'теория относительности', 'relativity', 'специальная теория относительности', 'special relativity',
+        'общая теория относительности', 'general relativity', 'пространство-время', 'spacetime',
+        # Другие науки
+        'химия', 'chemistry', 'химическая реакция', 'chemical reaction', 'молекула', 'molecule',
+        'атом', 'atom', 'периодическая таблица', 'periodic table', 'органическая химия', 'organic chemistry',
+        'биология', 'biology', 'клетка', 'cell', 'днк', 'dna', 'рнк', 'rna', 'эволюция', 'evolution',
+        'экология', 'ecology', 'экосистема', 'ecosystem', 'биосфера', 'biosphere'
     ]
     if any(keyword in text_lower for keyword in reasoning_keywords):
-        selected_model = 'deepseek-r1'
+        # Используем DeepSeek R1 для сложных рассуждений
         selected_name = 'DeepSeek R1'
         response = get_openrouter_response(text, conversation_history, "deepseek/deepseek-r1")
         return f"🤖 *Auto\\-Select:* {selected_name} 🧠\n\n{response}"
     
     # 3. КРЕАТИВНОЕ ПИСЬМО И КОНТЕНТ
     creative_keywords = [
-        # Письмо
-        'напиши', 'write', 'сочин', 'compose', 'создай текст', 'generate text',
-        'письмо', 'letter', 'email', 'имейл',
-        # Литература
-        'история', 'story', 'рассказ', 'tale', 'роман', 'novel', 'повесть', 'novella',
-        'стих', 'poem', 'поэзия', 'poetry', 'стихотворение', 'verse', 'рифма', 'rhyme',
-        'сказка', 'fairy tale', 'фантастика', 'fiction', 'фэнтези', 'fantasy',
-        # Контент
-        'статья', 'article', 'пост', 'post', 'блог', 'blog', 'контент', 'content',
-        'копирайт', 'copywriting', 'текст для сайта', 'website copy', 'слоган', 'slogan',
-        'заголовок', 'headline', 'описание', 'description',
-        # Академическое письмо
-        'эссе', 'essay', 'реферат', 'paper', 'диссертация', 'dissertation', 'тезис', 'thesis',
-        'аннотация', 'abstract', 'обзор литературы', 'literature review',
-        # Креатив
-        'креатив', 'creative', 'идея', 'idea', 'концепт', 'concept', 'brainstorm',
-        'мозговой штурм', 'сценарий', 'script', 'диалог', 'dialogue', 'монолог', 'monologue',
-        # Маркетинг
+        # Письмо - базовое
+        'напиши', 'write', 'сочин', 'compose', 'создай текст', 'generate text', 'придумай', 'придумать',
+        'письмо', 'letter', 'email', 'имейл', 'сообщение', 'message', 'текст', 'text', 'написать',
+        'writing', 'автор', 'author', 'редактировать', 'edit', 'редакция', 'revision', 'черновик', 'draft',
+        # Литература и художественное письмо
+        'история', 'story', 'рассказ', 'tale', 'роман', 'novel', 'повесть', 'novella', 'новелла',
+        'стих', 'poem', 'поэзия', 'poetry', 'стихотворение', 'verse', 'рифма', 'rhyme', 'строфа', 'stanza',
+        'сказка', 'fairy tale', 'фантастика', 'fiction', 'фэнтези', 'fantasy', 'sci-fi', 'научная фантастика',
+        'детектив', 'detective', 'триллер', 'thriller', 'хоррор', 'horror', 'ужасы', 'мистика', 'mystery',
+        'драма', 'drama', 'комедия', 'comedy', 'юмор', 'humor', 'сатира', 'satire', 'пародия', 'parody',
+        'мемуары', 'memoir', 'биография', 'biography', 'автобиография', 'autobiography',
+        'персонаж', 'character', 'герой', 'hero', 'протагонист', 'protagonist', 'антагонист', 'antagonist',
+        'сюжет', 'plot', 'завязка', 'exposition', 'кульминация', 'climax', 'развязка', 'denouement',
+        'конфликт', 'conflict', 'мотив', 'motif', 'символ', 'symbol', 'метафора', 'metaphor',
+        'эпитет', 'epithet', 'аллегория', 'allegory', 'гипербола', 'hyperbole', 'ирония', 'irony',
+        'повествование', 'narrative', 'описание', 'description', 'диалог', 'dialogue', 'монолог', 'monologue',
+        'точка зрения', 'point of view', 'первое лицо', 'first person', 'третье лицо', 'third person',
+        # Поэзия
+        'хайку', 'haiku', 'танка', 'tanka', 'сонет', 'sonnet', 'баллада', 'ballad', 'ода', 'ode',
+        'элегия', 'elegy', 'лимерик', 'limerick', 'белый стих', 'blank verse', 'верлибр', 'free verse',
+        'ямб', 'iamb', 'хорей', 'trochee', 'амфибрахий', 'amphibrach', 'анапест', 'anapest',
+        'дактиль', 'dactyl', 'размер', 'meter', 'ритм', 'rhythm', 'аллитерация', 'alliteration',
+        # Контент и копирайтинг
+        'статья', 'article', 'пост', 'post', 'блог', 'blog', 'контент', 'content', 'сontentwriting',
+        'копирайт', 'copywriting', 'копирайтинг', 'текст для сайта', 'website copy', 'слоган', 'slogan',
+        'заголовок', 'headline', 'подзаголовок', 'subheading', 'лид', 'lead', 'абзац', 'paragraph',
+        'introduction', 'введение', 'заключение', 'conclusion', 'описание товара', 'product description',
+        'отзыв', 'review', 'рецензия', 'testimonial', 'кейс', 'case study', 'whitepaper', 'гайд', 'guide',
+        'инструкция', 'tutorial', 'how-to', 'как сделать', 'пошаговый', 'step-by-step', 'faq', 'чаво',
+        'новость', 'news', 'пресс-релиз', 'press release', 'анонс', 'announcement', 'репортаж', 'report',
+        'интервью', 'interview', 'колонка', 'column', 'editorial', 'opinion piece', 'мнение',
+        # Академическое и техническое письмо
+        'эссе', 'essay', 'реферат', 'paper', 'курсовая', 'coursework', 'дипломная', 'diploma',
+        'диссертация', 'dissertation', 'тезис', 'thesis', 'научная работа', 'research paper',
+        'аннотация', 'abstract', 'резюме', 'summary', 'синопсис', 'synopsis', 'краткое содержание',
+        'обзор литературы', 'literature review', 'методология', 'methodology', 'исследование', 'research',
+        'анализ', 'analysis', 'выводы', 'findings', 'результаты', 'results', 'дискуссия', 'discussion',
+        'цитирование', 'citation', 'ссылка', 'reference', 'библиография', 'bibliography',
+        'документация', 'documentation', 'техническая документация', 'technical documentation',
+        'спецификация', 'specification', 'мануал', 'manual', 'руководство пользователя', 'user guide',
+        # Креатив и идеи
+        'креатив', 'creative', 'идея', 'idea', 'концепт', 'concept', 'brainstorm', 'брейнсторм',
+        'мозговой штурм', 'brainstorming', 'генерация идей', 'idea generation', 'вдохновение', 'inspiration',
+        'творчество', 'creativity', 'оригинальность', 'originality', 'уникальность', 'uniqueness',
+        'инновация', 'innovation', 'креативная концепция', 'creative concept', 'арт-директор', 'art director',
+        # Сценарии и скрипты
+        'сценарий', 'script', 'screenplay', 'киносценарий', 'movie script', 'сериал', 'tv series',
+        'эпизод', 'episode', 'сцена', 'scene', 'акт', 'act', 'ремарка', 'stage direction',
+        'реплика', 'line', 'речь', 'speech', 'voice-over', 'закадровый голос', 'narrator', 'рассказчик',
+        'storyboard', 'раскадровка', 'treatment', 'синопсис сценария', 'питч', 'pitch',
+        # Маркетинг и реклама
         'рекламный текст', 'ad copy', 'продающий текст', 'sales copy', 'призыв к действию',
-        'call to action', 'cta', 'landing page', 'лендинг'
+        'call to action', 'cta', 'landing page', 'лендинг', 'целевая страница', 'продающая страница',
+        'email-рассылка', 'email campaign', 'newsletter', 'новостная рассылка', 'письмо',
+        'триггерное письмо', 'trigger email', 'welcome email', 'приветственное письмо',
+        'seo-текст', 'seo copy', 'seo-статья', 'оптимизированный текст', 'ключевые слова', 'keywords',
+        'meta-описание', 'meta description', 'title tag', 'теги', 'tags',
+        'баннер', 'banner', 'объявление', 'ad', 'social media post', 'пост в соцсетях',
+        'инстаграм', 'instagram', 'фейсбук', 'facebook', 'твиттер', 'twitter', 'вконтакте', 'vk',
+        'хештеги', 'hashtags', 'вирусный контент', 'viral content', 'мем', 'meme', 'сторителлинг',
+        'storytelling', 'narrative marketing', 'нарративный маркетинг', 'brand story', 'история бренда',
+        'ценностное предложение', 'value proposition', 'usp', 'уникальное торговое предложение',
+        'офер', 'offer', 'промо', 'promo', 'акция', 'promotion', 'скидка', 'discount',
+        # Формальное и деловое письмо
+        'деловое письмо', 'business letter', 'официальное письмо', 'formal letter',
+        'сопроводительное письмо', 'cover letter', 'резюме', 'cv', 'curriculum vitae', 'resume',
+        'мотивационное письмо', 'motivation letter', 'рекомендательное письмо', 'recommendation letter',
+        'жалоба', 'complaint', 'претензия', 'claim', 'извинение', 'apology', 'благодарность', 'thank you',
+        'приглашение', 'invitation', 'поздравление', 'congratulations', 'соболезнование', 'condolence',
+        # Переписка и общение
+        'переписка', 'correspondence', 'общение', 'communication', 'беседа', 'conversation',
+        'чат', 'chat', 'месседж', 'message', 'смс', 'sms', 'whatsapp', 'телеграм', 'telegram',
+        'ответить', 'reply', 'respond', 'переформулировать', 'rephrase', 'перефразировать', 'paraphrase',
+        'улучшить текст', 'improve text', 'отредактировать', 'revise', 'проверить', 'proofread'
     ]
     if any(keyword in text_lower for keyword in creative_keywords):
-        selected_model = 'claude-4.5-sonnet'
+        # Используем Claude 4.5 Sonnet для креативного письма
         selected_name = 'Claude 4.5 Sonnet'
         response = get_openrouter_response(text, conversation_history, "anthropic/claude-4.5-sonnet")
         return f"🤖 *Auto\\-Select:* {selected_name} 🎭\n\n{response}"
     
     # 4. ПЕРЕВОДЫ И ЯЗЫКИ
     translation_keywords = [
-        'перевед', 'translate', 'translation', 'переводчик', 'translator',
+        # Перевод
+        'перевед', 'translate', 'translation', 'переводчик', 'translator', 'перевести', 'переведи',
+        'translat', 'интерпретация', 'interpretation', 'локализация', 'localization', 'l10n',
+        # Направления перевода
         'на английский', 'на русский', 'на испанский', 'на французский', 'на немецкий',
         'на китайский', 'на японский', 'на корейский', 'на итальянский', 'на португальский',
+        'на арабский', 'на хинди', 'на турецкий', 'на польский', 'на украинский', 'на чешский',
+        'на нидерландский', 'на шведский', 'на датский', 'на норвежский', 'на финский',
+        'на греческий', 'на румынский', 'на венгерский', 'на тайский', 'на вьетнамский',
         'to english', 'to russian', 'to spanish', 'to french', 'to german', 'to chinese',
-        'язык', 'language', 'иностранный', 'foreign', 'грамматика', 'grammar',
-        'произношение', 'pronunciation', 'словарь', 'dictionary', 'фраза на', 'phrase in'
+        'to japanese', 'to korean', 'to italian', 'to portuguese', 'to arabic', 'to hindi',
+        'с английского', 'с русского', 'с испанского', 'from english', 'from russian', 'from spanish',
+        # Языки и изучение
+        'язык', 'language', 'иностранный', 'foreign', 'грамматика', 'grammar', 'лексика', 'vocabulary',
+        'произношение', 'pronunciation', 'словарь', 'dictionary', 'фраза на', 'phrase in',
+        'значение слова', 'word meaning', 'как сказать', 'how to say', 'как произносится', 'how to pronounce',
+        'синоним', 'synonym', 'антоним', 'antonym', 'идиома', 'idiom', 'фразеологизм', 'phraseology',
+        'сленг', 'slang', 'colloquial', 'разговорный', 'формальный', 'formal', 'литературный', 'literary',
+        'диалект', 'dialect', 'акцент', 'accent', 'транскрипция', 'transcription', 'транслитерация',
+        # Изучение языков
+        'учить язык', 'learn language', 'изучение языка', 'language learning', 'языковая практика',
+        'language practice', 'уровень языка', 'language level', 'a1', 'a2', 'b1', 'b2', 'c1', 'c2',
+        'beginner', 'intermediate', 'advanced', 'начинающий', 'средний уровень', 'продвинутый',
+        'правило грамматики', 'grammar rule', 'времена глаголов', 'verb tenses', 'артикль', 'article',
+        'предлог', 'preposition', 'союз', 'conjunction', 'местоимение', 'pronoun', 'существительное', 'noun',
+        'глагол', 'verb', 'прилагательное', 'adjective', 'наречие', 'adverb', 'части речи', 'parts of speech',
+        'падеж', 'case', 'род', 'gender', 'число', 'number', 'время', 'tense', 'залог', 'voice',
+        'наклонение', 'mood', 'спряжение', 'conjugation', 'склонение', 'declension'
     ]
     if any(keyword in text_lower for keyword in translation_keywords):
-        selected_model = 'gpt-5'
-        selected_name = 'GPT-5'
-        response = get_openrouter_response(text, conversation_history, "openai/gpt-5")
+        # Используем GPT-4o для переводов (хорошо знает языки)
+        selected_name = 'GPT-4o'
+        response = get_openrouter_response(text, conversation_history, "openai/gpt-4o")
         return f"🤖 *Auto\\-Select:* {selected_name} 🌍\n\n{response}"
     
     # 5. ДАННЫЕ, АНАЛИТИКА, ML/AI
     data_keywords = [
-        'данные', 'data', 'аналитика', 'analytics', 'анализ данных', 'data analysis',
-        'датасет', 'dataset', 'csv', 'excel', 'таблица данных', 'dataframe', 'pandas',
-        'numpy', 'matplotlib', 'visualiz', 'визуализация', 'график', 'chart', 'plot',
-        'machine learning', 'ml', 'машинное обучение', 'нейросеть', 'neural network',
-        'deep learning', 'глубокое обучение', 'ai', 'искусственный интеллект',
-        'tensorflow', 'pytorch', 'keras', 'sklearn', 'scikit-learn',
-        'модель', 'model', 'обучение', 'training', 'предсказание', 'prediction',
-        'классификация', 'classification', 'кластеризация', 'clustering',
-        'регрессия', 'regression', 'feature engineering', 'признаки',
-        'bigdata', 'большие данные', 'hadoop', 'spark', 'etl'
+        # Данные и обработка
+        'данные', 'data', 'аналитика', 'analytics', 'анализ данных', 'data analysis', 'data science',
+        'датасет', 'dataset', 'csv', 'excel', 'таблица данных', 'dataframe', 'pandas', 'numpy', 'scipy',
+        'визуализация', 'visualiz', 'visualization', 'график', 'chart', 'plot', 'matplotlib', 'seaborn',
+        'plotly', 'dash', 'tableau', 'power bi', 'дашборд', 'dashboard', 'отчёт', 'report',
+        'обработка данных', 'data processing', 'очистка данных', 'data cleaning', 'preprocessing',
+        'нормализация', 'normalization', 'стандартизация', 'standardization', 'импутация', 'imputation',
+        # Машинное обучение
+        'machine learning', 'ml', 'машинное обучение', 'нейросеть', 'neural network', 'нейронная сеть',
+        'deep learning', 'глубокое обучение', 'ai', 'искусственный интеллект', 'artificial intelligence',
+        'tensorflow', 'pytorch', 'keras', 'sklearn', 'scikit-learn', 'xgboost', 'lightgbm', 'catboost',
+        'hugging face', 'transformers', 'llm', 'большие языковые модели', 'gpt', 'bert', 'llama',
+        # Типы моделей и задачи
+        'модель', 'model', 'обучение', 'training', 'тренировка', 'предсказание', 'prediction', 'прогноз',
+        'классификация', 'classification', 'кластеризация', 'clustering', 'регрессия', 'regression',
+        'сегментация', 'segmentation', 'детекция', 'detection', 'распознавание', 'recognition',
+        'рекомендательная система', 'recommendation system', 'ранжирование', 'ranking',
+        'обучение с учителем', 'supervised learning', 'обучение без учителя', 'unsupervised learning',
+        'обучение с подкреплением', 'reinforcement learning', 'transfer learning', 'трансферное обучение',
+        'fine-tuning', 'дообучение', 'pre-training', 'предобучение', 'zero-shot', 'few-shot', 'one-shot',
+        # Работа с моделями
+        'feature engineering', 'признаки', 'features', 'целевая переменная', 'target', 'метка', 'label',
+        'обучающая выборка', 'training set', 'тестовая выборка', 'test set', 'валидация', 'validation',
+        'кросс-валидация', 'cross-validation', 'переобучение', 'overfitting', 'недообучение', 'underfitting',
+        'регуляризация', 'regularization', 'l1', 'l2', 'dropout', 'batch normalization', 'гиперпараметры',
+        'hyperparameters', 'подбор параметров', 'hyperparameter tuning', 'grid search', 'random search',
+        'метрика', 'metric', 'accuracy', 'precision', 'recall', 'f1-score', 'auc', 'roc', 'confusion matrix',
+        'матрица ошибок', 'loss function', 'функция потерь', 'градиентный спуск', 'gradient descent',
+        'backpropagation', 'обратное распространение', 'оптимизатор', 'optimizer', 'adam', 'sgd',
+        # Нейронные сети
+        'нейронная сеть', 'neural net', 'fully connected', 'полносвязная', 'cnn', 'convolutional',
+        'свёрточная сеть', 'rnn', 'recurrent', 'рекуррентная', 'lstm', 'gru', 'transformer',
+        'attention', 'внимание', 'self-attention', 'encoder', 'decoder', 'энкодер', 'декодер',
+        'gan', 'generative adversarial network', 'генеративная модель', 'vae', 'variational autoencoder',
+        'autoencoder', 'автокодировщик', 'embedding', 'эмбеддинг', 'word2vec', 'glove', 'fasttext',
+        # Большие данные
+        'bigdata', 'большие данные', 'hadoop', 'spark', 'pyspark', 'hive', 'pig', 'kafka', 'flink',
+        'etl', 'data pipeline', 'data warehouse', 'хранилище данных', 'data lake', 'озеро данных',
+        'batch processing', 'пакетная обработка', 'stream processing', 'потоковая обработка',
+        # Компьютерное зрение и NLP
+        'computer vision', 'компьютерное зрение', 'обработка изображений', 'image processing', 'opencv',
+        'yolo', 'объектная детекция', 'object detection', 'сегментация изображений', 'image segmentation',
+        'распознавание лиц', 'face recognition', 'ocr', 'распознавание текста', 'text recognition',
+        'nlp', 'natural language processing', 'обработка естественного языка', 'текстовая аналитика',
+        'text analytics', 'sentiment analysis', 'анализ тональности', 'токенизация', 'tokenization',
+        'lemmatization', 'лемматизация', 'stemming', 'стемминг', 'named entity recognition', 'ner',
+        'topic modeling', 'тематическое моделирование', 'lda', 'text generation', 'генерация текста'
     ]
     if any(keyword in text_lower for keyword in data_keywords):
-        selected_model = 'qwen-3-thinking'
+        # Используем Qwen 3 Thinking для аналитики
         selected_name = 'Qwen 3 Thinking'
         response = get_openrouter_response(text, conversation_history, "qwen/qwen-3-thinking")
         return f"🤖 *Auto\\-Select:* {selected_name} 📊\n\n{response}"
     
     # 6. БИЗНЕС И СТРАТЕГИЯ
     business_keywords = [
-        'бизнес', 'business', 'стратегия', 'strategy', 'маркетинг', 'marketing',
-        'продажи', 'sales', 'roi', 'окупаемость', 'прибыль', 'profit', 'revenue',
-        'выручка', 'бюджет', 'budget', 'инвестиции', 'investment', 'стартап', 'startup',
-        'бизнес-план', 'business plan', 'swot', 'конкуренты', 'competitors',
-        'целевая аудитория', 'target audience', 'сегмент', 'segment', 'ниша', 'niche',
-        'позиционирование', 'positioning', 'брендинг', 'branding', 'бренд', 'brand',
-        'кастдев', 'custdev', 'customer development', 'unit economics', 'юнит-экономика',
-        'метрики', 'metrics', 'kpi', 'conversion', 'конверсия', 'воронка', 'funnel',
-        'монетизация', 'monetization', 'ценообразование', 'pricing'
+        'бизнес', 'business', 'компания', 'company', 'предприятие', 'enterprise', 'корпорация', 'corporation',
+        'стратегия', 'strategy', 'маркетинг', 'marketing', 'продажи', 'sales', 'продавать', 'sell',
+        'roi', 'окупаемость', 'прибыль', 'profit', 'revenue', 'выручка', 'доход', 'income',
+        'бюджет', 'budget', 'финансы', 'finance', 'инвестиции', 'investment', 'инвестор', 'investor',
+        'стартап', 'startup', 'предприниматель', 'entrepreneur', 'бизнес-модель', 'business model',
+        'бизнес-план', 'business plan', 'pitch deck', 'презентация для инвесторов', 'питч',
+        'swot', 'анализ', 'pestle', 'porter', 'пять сил портера', 'конкуренты', 'competitors',
+        'конкурентное преимущество', 'competitive advantage', 'дифференциация', 'differentiation',
+        'целевая аудитория', 'target audience', 'сегмент', 'segment', 'сегментация', 'segmentation',
+        'ниша', 'niche', 'позиционирование', 'positioning', 'брендинг', 'branding', 'бренд', 'brand',
+        'customer journey', 'путь клиента', 'кастдев', 'custdev', 'customer development',
+        'unit economics', 'юнит-экономика', 'ltv', 'lifetime value', 'cac', 'customer acquisition cost',
+        'метрики', 'metrics', 'kpi', 'ключевые показатели', 'conversion', 'конверсия', 'cr',
+        'воронка', 'funnel', 'воронка продаж', 'sales funnel', 'лиды', 'leads', 'лидогенерация',
+        'монетизация', 'monetization', 'ценообразование', 'pricing', 'модель ценообразования',
+        'subscription', 'подписка', 'freemium', 'saas', 'b2b', 'b2c', 'b2g',
+        'crm', 'erp', 'customer relationship management', 'crm-система', 'автоматизация',
+        'продуктовая стратегия', 'product strategy', 'product market fit', 'mvp',
+        'минимально жизнеспособный продукт', 'минимальный продукт', 'product-market fit',
+        'growth hacking', 'ростовые стратегии', 'масштабирование', 'scaling', 'экспансия', 'expansion',
+        'рынок', 'market', 'рыночная доля', 'market share', 'тренды', 'trends', 'анализ рынка',
+        'маркетинговая стратегия', 'marketing strategy', '4p', '7p', 'marketing mix',
+        'performance marketing', 'контент-маркетинг', 'content marketing', 'smm', 'social media marketing',
+        'influencer marketing', 'инфлюенс-маркетинг', 'email marketing', 'партизанский маркетинг',
+        'growth marketing', 'продуктовый маркетинг', 'brand awareness', 'узнаваемость бренда',
+        'retention', 'удержание', 'churn', 'отток', 'реактивация', 'reactivation',
+        'operations', 'операции', 'процессы', 'бизнес-процессы', 'business processes', 'оптимизация',
+        'эффективность', 'efficiency', 'производительность', 'productivity', 'lean', 'agile', 'scrum',
+        'управление проектами', 'project management', 'менеджмент', 'management', 'лидерство', 'leadership',
+        'hr', 'human resources', 'персонал', 'команда', 'team', 'найм', 'recruiting', 'hiring',
+        'корпоративная культура', 'corporate culture', 'мотивация', 'motivation', 'kpi сотрудников'
     ]
     if any(keyword in text_lower for keyword in business_keywords):
-        selected_model = 'gpt-4o'
+        # Используем GPT-4o для бизнес-задач
         selected_name = 'GPT-4o'
         response = get_openrouter_response(text, conversation_history, "openai/gpt-4o")
         return f"🤖 *Auto\\-Select:* {selected_name} 💼\n\n{response}"
     
     # 7. МЕДИЦИНА И ЗДОРОВЬЕ
     medical_keywords = [
-        'здоровье', 'health', 'медицина', 'medicine', 'болезнь', 'disease', 'illness',
-        'симптом', 'symptom', 'лечение', 'treatment', 'терапия', 'therapy',
-        'диагноз', 'diagnosis', 'врач', 'doctor', 'доктор', 'physician',
-        'анализ крови', 'blood test', 'витамин', 'vitamin', 'препарат', 'drug', 'medication',
-        'фармакология', 'pharmacology', 'аптека', 'pharmacy', 'рецепт', 'prescription',
-        'питание', 'nutrition', 'диета', 'diet', 'калории', 'calories',
-        'фитнес', 'fitness', 'тренировка', 'workout', 'упражнение', 'exercise',
-        'психология', 'psychology', 'стресс', 'stress', 'депрессия', 'depression',
-        'тревога', 'anxiety', 'сон', 'sleep', 'бессонница', 'insomnia'
+        'здоровье', 'health', 'медицина', 'medicine', 'болезнь', 'disease', 'illness', 'заболевание',
+        'симптом', 'symptom', 'признак', 'лечение', 'treatment', 'терапия', 'therapy', 'лечить',
+        'диагноз', 'diagnosis', 'диагностика', 'врач', 'doctor', 'доктор', 'physician', 'медработник',
+        'анализ крови', 'blood test', 'анализы', 'tests', 'обследование', 'examination', 'скрининг',
+        'витамин', 'vitamin', 'минерал', 'mineral', 'добавка', 'supplement', 'бад',
+        'препарат', 'drug', 'medication', 'лекарство', 'medicine', 'таблетка', 'pill',
+        'фармакология', 'pharmacology', 'аптека', 'pharmacy', 'рецепт', 'prescription', 'дозировка',
+        'побочные эффекты', 'side effects', 'противопоказания', 'contraindications',
+        'питание', 'nutrition', 'диета', 'diet', 'калории', 'calories', 'пп', 'правильное питание',
+        'белки', 'protein', 'жиры', 'fats', 'углеводы', 'carbs', 'макронутриенты', 'микронутриенты',
+        'фитнес', 'fitness', 'тренировка', 'workout', 'упражнение', 'exercise', 'зал', 'gym',
+        'кардио', 'cardio', 'силовая тренировка', 'strength training', 'йога', 'yoga', 'растяжка',
+        'психология', 'psychology', 'психотерапия', 'psychotherapy', 'ментальное здоровье', 'mental health',
+        'стресс', 'stress', 'депрессия', 'depression', 'тревога', 'anxiety', 'паническая атака',
+        'сон', 'sleep', 'бессонница', 'insomnia', 'режим сна', 'sleep schedule', 'мелатонин',
+        'боль', 'pain', 'головная боль', 'headache', 'мигрень', 'migraine', 'спина', 'back pain',
+        'температура', 'temperature', 'жар', 'fever', 'кашель', 'cough', 'простуда', 'cold',
+        'грипп', 'flu', 'инфекция', 'infection', 'вирус', 'virus', 'бактерия', 'bacteria',
+        'иммунитет', 'immunity', 'иммунная система', 'immune system', 'вакцина', 'vaccine',
+        'аллергия', 'allergy', 'аллерген', 'allergen', 'астма', 'asthma', 'хронический', 'chronic',
+        'давление', 'pressure', 'гипертония', 'hypertension', 'гипотония', 'hypotension',
+        'сердце', 'heart', 'кардиология', 'cardiology', 'инсульт', 'stroke', 'инфаркт', 'heart attack',
+        'диабет', 'diabetes', 'сахар в крови', 'blood sugar', 'холестерин', 'cholesterol',
+        'беременность', 'pregnancy', 'роды', 'childbirth', 'гинекология', 'gynecology', 'педиатрия',
+        'травма', 'injury', 'перелом', 'fracture', 'ушиб', 'bruise', 'растяжение', 'sprain',
+        'операция', 'surgery', 'хирургия', 'реабилитация', 'rehabilitation', 'восстановление'
     ]
     if any(keyword in text_lower for keyword in medical_keywords):
-        selected_model = 'gemini-2.5-pro'
+        # Используем Gemini 2.5 Pro для медицинских тем
         selected_name = 'Gemini 2.5 Pro'
         response = get_openrouter_response(text, conversation_history, "google/gemini-2.5-pro")
         return f"🤖 *Auto\\-Select:* {selected_name} 🏥\n\n{response}"
     
     # 8. ОБРАЗОВАНИЕ И ОБУЧЕНИЕ
     education_keywords = [
-        'учеба', 'study', 'обучение', 'learning', 'образование', 'education',
-        'школа', 'school', 'универ', 'university', 'колледж', 'college',
-        'экзамен', 'exam', 'тест', 'quiz', 'домашка', 'homework', 'задание', 'assignment',
-        'курс', 'course', 'лекция', 'lecture', 'семинар', 'seminar', 'вебинар', 'webinar',
-        'учебник', 'textbook', 'конспект', 'notes', 'шпаргалка', 'cheat sheet',
+        'учеба', 'study', 'обучение', 'learning', 'образование', 'education', 'учить', 'learn',
+        'школа', 'school', 'универ', 'university', 'университет', 'колледж', 'college', 'институт',
+        'экзамен', 'exam', 'тест', 'quiz', 'зачет', 'test', 'домашка', 'homework', 'дз', 'задание',
+        'assignment', 'проект', 'project', 'презентация', 'presentation', 'контрольная', 'control work',
+        'курс', 'course', 'лекция', 'lecture', 'семинар', 'seminar', 'вебинар', 'webinar', 'занятие',
+        'урок', 'lesson', 'класс', 'class', 'онлайн-курс', 'online course', 'mooc', 'edtech',
+        'учебник', 'textbook', 'конспект', 'notes', 'шпаргалка', 'cheat sheet', 'методичка',
+        'учебный материал', 'study material', 'литература', 'bibliography', 'источники', 'sources',
         'объясни простыми словами', 'explain simply', 'eli5', 'как понять', 'how to understand',
-        'разбери тему', 'break down', 'примеры', 'examples', 'практика', 'practice'
+        'разбери тему', 'break down', 'примеры', 'examples', 'практика', 'practice', 'упражнения',
+        'выучить', 'memorize', 'запомнить', 'remember', 'подготовиться', 'prepare', 'подготовка',
+        'студент', 'student', 'ученик', 'pupil', 'преподаватель', 'teacher', 'профессор', 'professor',
+        'наставник', 'mentor', 'репетитор', 'tutor', 'самообучение', 'self-study', 'самостоятельно',
+        'аттестация', 'certification', 'диплом', 'diploma', 'степень', 'degree', 'бакалавр', 'bachelor',
+        'магистр', 'master', 'кандидат наук', 'phd', 'докторантура', 'стипендия', 'scholarship',
+        'образовательная программа', 'curriculum', 'учебный план', 'syllabus', 'модуль', 'module',
+        'практическое задание', 'practical task', 'лабораторная', 'lab work', 'теория', 'theory'
     ]
     if any(keyword in text_lower for keyword in education_keywords):
-        selected_model = 'claude-3.5-haiku'
+        # Используем Claude 3.5 Haiku для образовательных целей
         selected_name = 'Claude 3.5 Haiku'
         response = get_openrouter_response(text, conversation_history, "anthropic/claude-3.5-haiku")
         return f"🤖 *Auto\\-Select:* {selected_name} 📚\n\n{response}"
     
     # 9. ЮРИДИЧЕСКИЕ ВОПРОСЫ
     legal_keywords = [
-        'юридический', 'legal', 'закон', 'law', 'право', 'rights', 'правовой', 'lawful',
-        'договор', 'contract', 'соглашение', 'agreement', 'контракт', 'deal',
-        'иск', 'lawsuit', 'суд', 'court', 'судебный', 'judicial',
-        'адвокат', 'lawyer', 'attorney', 'юрист', 'юр.лицо', 'legal entity',
-        'ип', 'ооо', 'llc', 'регистрация', 'registration', 'лицензия', 'license',
-        'налог', 'tax', 'налоговая', 'налогообложение', 'taxation',
-        'интеллектуальная собственность', 'intellectual property', 'патент', 'patent',
-        'авторское право', 'copyright', 'товарный знак', 'trademark'
+        'юридический', 'legal', 'закон', 'law', 'право', 'rights', 'правовой', 'lawful', 'законный',
+        'договор', 'contract', 'соглашение', 'agreement', 'контракт', 'deal', 'сделка', 'transaction',
+        'иск', 'lawsuit', 'судебный иск', 'claim', 'суд', 'court', 'судебный', 'judicial', 'судья', 'judge',
+        'адвокат', 'lawyer', 'attorney', 'юрист', 'правовед', 'legal counsel', 'юридическая консультация',
+        'юр.лицо', 'legal entity', 'физ.лицо', 'individual', 'индивидуальный предприниматель',
+        'ип', 'ооо', 'llc', 'limited liability company', 'зао', 'ао', 'акционерное общество',
+        'регистрация', 'registration', 'лицензия', 'license', 'разрешение', 'permit', 'сертификация',
+        'налог', 'tax', 'налоговая', 'налогообложение', 'taxation', 'ндс', 'vat', 'ндфл', 'income tax',
+        'налоговая декларация', 'tax return', 'налоговый вычет', 'tax deduction', 'фнс', 'налоговый кодекс',
+        'интеллектуальная собственность', 'intellectual property', 'ip', 'патент', 'patent', 'патентование',
+        'авторское право', 'copyright', 'копирайт', 'товарный знак', 'trademark', 'бренд', 'brand name',
+        'лицензионное соглашение', 'license agreement', 'роялти', 'royalty', 'ноу-хау', 'know-how',
+        'гражданское право', 'civil law', 'уголовное право', 'criminal law', 'административное право',
+        'трудовое право', 'labor law', 'семейное право', 'family law', 'наследство', 'inheritance',
+        'завещание', 'will', 'testament', 'наследник', 'heir', 'наследование', 'succession',
+        'развод', 'divorce', 'алименты', 'alimony', 'опека', 'custody', 'guardianship',
+        'трудовой договор', 'employment contract', 'увольнение', 'dismissal', 'termination',
+        'компенсация', 'compensation', 'штраф', 'fine', 'пеня', 'penalty', 'санкции', 'sanctions',
+        'судебное разбирательство', 'litigation', 'арбитраж', 'arbitration', 'медиация', 'mediation',
+        'апелляция', 'appeal', 'кассация', 'cassation', 'пересмотр', 'revision', 'verdict', 'приговор',
+        'доверенность', 'power of attorney', 'нотариус', 'notary', 'нотариальное заверение',
+        'устав', 'charter', 'учредительные документы', 'founding documents', 'реорганизация',
+        'ликвидация', 'liquidation', 'банкротство', 'bankruptcy', 'несостоятельность', 'insolvency',
+        'недвижимость', 'real estate', 'собственность', 'property', 'аренда', 'lease', 'rent',
+        'купля-продажа', 'sale and purchase', 'ипотека', 'mortgage', 'залог', 'pledge', 'collateral',
+        'права потребителей', 'consumer rights', 'возврат товара', 'product return', 'гарантия', 'warranty',
+        'конфиденциальность', 'confidentiality', 'nda', 'соглашение о неразглашении', 'gdpr', 'персональные данные'
     ]
     if any(keyword in text_lower for keyword in legal_keywords):
-        selected_model = 'gpt-4.1'
+        # Используем GPT-4.1 для юридических вопросов
         selected_name = 'GPT-4.1'
         response = get_openrouter_response(text, conversation_history, "openai/gpt-4.1")
         return f"🤖 *Auto\\-Select:* {selected_name} ⚖️\n\n{response}"
     
     # 10. КРАТКИЕ БЫСТРЫЕ ВОПРОСЫ (< 50 символов)
     if len(text) < 50 and ('?' in text or any(word in text_lower for word in ['что', 'как', 'где', 'когда', 'кто', 'сколько', 'what', 'how', 'where', 'when', 'who'])):
-        selected_model = 'gemini-2.5-flash'
+        # Используем Gemini 2.5 Flash для быстрых ответов
         selected_name = 'Gemini 2.5 Flash'
         response = get_openrouter_response(text, conversation_history, "google/gemini-2.5-flash")
         return f"🤖 *Auto\\-Select:* {selected_name} ⚡\n\n{response}"
     
-    # 11. ДЛИННЫЕ СЛОЖНЫЕ ЗАПРОСЫ (> 500 символов) - мощная модель с большим контекстом
+    # 11. ДЛИННЫЕ СЛОЖНЫЕ ЗАПРОСЫ (> 500 символов)
     if len(text) > 500:
-        selected_model = 'gpt-5'
-        selected_name = 'GPT-5'
-        response = get_openrouter_response(text, conversation_history, "openai/gpt-5")
-        return f"🤖 *Auto\\-Select:* {selected_name} 🌟\n\n{response}"
+        # Используем Grok 4 для длинных и сложных запросов (2M контекст)
+        selected_name = 'Grok 4 Fast'
+        response = get_openrouter_response(text, conversation_history, "x-ai/grok-4-fast")
+        return f"🤖 *Auto\\-Select:* {selected_name} 🚀\n\n{response}"
     
     # 12. ПО УМОЛЧАНИЮ - универсальная мощная модель
-    selected_model = 'gpt-4o'
+    # Используем GPT-4o как универсальную модель
     selected_name = 'GPT-4o'
     response = get_openrouter_response(text, conversation_history, "openai/gpt-4o")
     return f"🤖 *Auto\\-Select:* {selected_name} 💫\n\n{response}"
 
-# Словарь моделей с метаданными (24 модели: 23 обычных + Auto-Select)
+# Словарь моделей с метаданными (21 модель)
 MODELS = {
-    # 🤖 AUTO-SELECT - умный выбор модели
+    # AUTO-SELECT
     'auto-select': {
-        'name': '🤖 Auto-Select',
-        'emoji': '🎯',
-        'description': 'Умный выбор лучшей модели для вашего запроса',
-        'category': 'auto',
+        'name': 'Auto-Select',
+        'emoji': '🤖',
+        'description': 'Автоматически выбирает оптимальную модель для вашего запроса',
+        'category': 'all',
+        'estimated_time': 5,  # секунды
+        'context_limit': 128000,  # токены (128K)
         'function': auto_select_model
     },
     
     # OpenAI GPT модели
     'gpt-5': {
-        'name': 'GPT 5',
+        'name': 'GPT-5',
         'emoji': '🌟',
         'description': 'Новейшая GPT-5 от OpenAI',
         'category': 'openai',
+        'estimated_time': 15,  # секунды (большая модель - дольше)
+        'context_limit': 1000000,  # токены (1M)
         'function': lambda text, history: get_openrouter_response(text, history, "openai/gpt-5")
     },
     'gpt-5-nano': {
-        'name': 'GPT 5 Nano',
+        'name': 'GPT-5 Nano',
         'emoji': '⚡',
         'description': 'Компактная версия GPT-5',
         'category': 'openai',
+        'estimated_time': 3,  # секунды (nano - быстрая)
+        'context_limit': 128000,  # токены (128K)
         'function': lambda text, history: get_openrouter_response(text, history, "openai/gpt-5-nano")
     },
     'gpt-4.1': {
@@ -1012,6 +1224,8 @@ MODELS = {
         'emoji': '🤖',
         'description': 'Улучшенная GPT-4',
         'category': 'openai',
+        'estimated_time': 8,  # секунды
+        'context_limit': 128000,  # токены (128K)
         'function': lambda text, history: get_openrouter_response(text, history, "openai/gpt-4.1")
     },
     'gpt-4.1-mini': {
@@ -1019,6 +1233,8 @@ MODELS = {
         'emoji': '⚙️',
         'description': 'Быстрая GPT-4.1 Mini',
         'category': 'openai',
+        'estimated_time': 3,  # секунды (mini - быстрая)
+        'context_limit': 128000,  # токены (128K)
         'function': lambda text, history: get_openrouter_response(text, history, "openai/gpt-4.1-mini")
     },
     'gpt-4o': {
@@ -1026,6 +1242,8 @@ MODELS = {
         'emoji': '💫',
         'description': 'Оптимизированная GPT-4o',
         'category': 'openai',
+        'estimated_time': 5,  # секунды
+        'context_limit': 128000,  # токены (128K)
         'function': lambda text, history: get_openrouter_response(text, history, "openai/gpt-4o")
     },
     'gpt-4o-mini': {
@@ -1033,6 +1251,8 @@ MODELS = {
         'emoji': '🔷',
         'description': 'Быстрая GPT-4o Mini',
         'category': 'openai',
+        'estimated_time': 2,  # секунды (mini - очень быстрая)
+        'context_limit': 128000,  # токены (128K)
         'function': lambda text, history: get_openrouter_response(text, history, "openai/gpt-4o-mini")
     },
     'gpt-4-turbo': {
@@ -1040,6 +1260,8 @@ MODELS = {
         'emoji': '💨',
         'description': 'Быстрая GPT-4 Turbo',
         'category': 'openai',
+        'estimated_time': 4,  # секунды (turbo - быстрая)
+        'context_limit': 128000,  # токены (128K)
         'function': lambda text, history: get_openrouter_response(text, history, "openai/gpt-4-turbo")
     },
     
@@ -1049,6 +1271,8 @@ MODELS = {
         'emoji': '🧠',
         'description': 'Reasoning модель от DeepSeek',
         'category': 'deepseek',
+        'estimated_time': 10,  # секунды (reasoning - медленнее)
+        'context_limit': 64000,  # токены (64K)
         'function': lambda text, history: get_openrouter_response(text, history, "deepseek/deepseek-r1")
     },
     'deepseek-v3': {
@@ -1056,6 +1280,8 @@ MODELS = {
         'emoji': '🔮',
         'description': 'Мощная модель DeepSeek V3',
         'category': 'deepseek',
+        'estimated_time': 7,  # секунды
+        'context_limit': 64000,  # токены (64K)
         'function': lambda text, history: get_openrouter_response(text, history, "deepseek/deepseek-chat")
     },
     
@@ -1065,6 +1291,8 @@ MODELS = {
         'emoji': '💎',
         'description': 'Топовая Gemini с большим контекстом',
         'category': 'google',
+        'estimated_time': 12,  # секунды (pro - большая модель)
+        'context_limit': 1000000,  # токены (1M)
         'function': lambda text, history: get_openrouter_response(text, history, "google/gemini-2.5-pro")
     },
     'gemini-2.5-flash': {
@@ -1072,6 +1300,8 @@ MODELS = {
         'emoji': '✨',
         'description': 'Быстрая Gemini 2.5 Flash',
         'category': 'google',
+        'estimated_time': 3,  # секунды (flash - быстрая)
+        'context_limit': 1000000,  # токены (1M)
         'function': lambda text, history: get_openrouter_response(text, history, "google/gemini-2.5-flash")
     },
     
@@ -1081,6 +1311,8 @@ MODELS = {
         'emoji': '🐉',
         'description': 'Мощная китайская модель Qwen 3',
         'category': 'qwen',
+        'estimated_time': 6,  # секунды
+        'context_limit': 128000,  # токены (128K)
         'function': lambda text, history: get_openrouter_response(text, history, "qwen/qwen-3")
     },
     'qwen-3-thinking': {
@@ -1088,6 +1320,8 @@ MODELS = {
         'emoji': '🧩',
         'description': 'Reasoning версия Qwen 3',
         'category': 'qwen',
+        'estimated_time': 9,  # секунды (thinking - медленнее)
+        'context_limit': 128000,  # токены (128K)
         'function': lambda text, history: get_openrouter_response(text, history, "qwen/qwen-3-thinking")
     },
     
@@ -1097,6 +1331,8 @@ MODELS = {
         'emoji': '🎭',
         'description': 'Топовый Claude 4.5 Sonnet от Anthropic',
         'category': 'claude',
+        'estimated_time': 10,  # секунды (топовая модель)
+        'context_limit': 200000,  # токены (200K)
         'function': lambda text, history: get_openrouter_response(text, history, "anthropic/claude-4.5-sonnet")
     },
     'claude-3.5-haiku': {
@@ -1104,6 +1340,8 @@ MODELS = {
         'emoji': '🎨',
         'description': 'Быстрый Claude 3.5 Haiku',
         'category': 'claude',
+        'estimated_time': 4,  # секунды (haiku - быстрая)
+        'context_limit': 200000,  # токены (200K)
         'function': lambda text, history: get_openrouter_response(text, history, "anthropic/claude-3.5-haiku")
     },
     
@@ -1113,6 +1351,8 @@ MODELS = {
         'emoji': '🚀',
         'description': 'Новейший Grok 4 от xAI',
         'category': 'grok',
+        'estimated_time': 8,  # секунды
+        'context_limit': 128000,  # токены (128K)
         'function': lambda text, history: get_openrouter_response(text, history, "x-ai/grok-4")
     },
     'grok-3': {
@@ -1120,6 +1360,8 @@ MODELS = {
         'emoji': '🎯',
         'description': 'Grok 3 от Илона Маска',
         'category': 'grok',
+        'estimated_time': 6,  # секунды
+        'context_limit': 128000,  # токены (128K)
         'function': lambda text, history: get_openrouter_response(text, history, "x-ai/grok-3")
     },
     'grok-4-fast': {
@@ -1127,6 +1369,8 @@ MODELS = {
         'emoji': '⚡',
         'description': 'Быстрый Grok 4 (2M контекст!)',
         'category': 'grok',
+        'estimated_time': 3,  # секунды (fast - быстрая)
+        'context_limit': 2000000,  # токены (2M)
         'function': lambda text, history: get_openrouter_response(text, history, "x-ai/grok-4-fast")
     },
     'grok-code-fast': {
@@ -1134,30 +1378,20 @@ MODELS = {
         'emoji': '💻',
         'description': 'Grok для программирования',
         'category': 'grok',
+        'estimated_time': 4,  # секунды (code fast)
+        'context_limit': 128000,  # токены (128K)
         'function': lambda text, history: get_openrouter_response(text, history, "x-ai/grok-code-fast-1")
     },
     
-    # Groq модели - только актуальные
-    'llama-3.1-8b': {
-        'name': 'Llama 3.1 8B',
+    # Llama модели
+    'llama-3.3-70b': {
+        'name': 'Llama 3.3 70B',
         'emoji': '🦙',
-        'description': 'Быстрая Llama 3.1 8B через Groq',
+        'description': 'Мощная модель Llama 3.3 с 70B параметров',
         'category': 'llama',
-        'function': lambda text, history: get_groq_response(text, history, "llama-3.1-8b-instant")
-    },
-    'gpt-oss-120b': {
-        'name': 'GPT OSS 120B',
-        'emoji': '🚀',
-        'description': 'Мощная модель GPT OSS 120B через Groq',
-        'category': 'gpt',
-        'function': lambda text, history: get_groq_response(text, history, "openai/gpt-oss-120b")
-    },
-    'qwen3-32b': {
-        'name': 'Qwen 3 32B',
-        'emoji': '🐉',
-        'description': 'Мощная модель Qwen 3 32B через Groq',
-        'category': 'qwen',
-        'function': lambda text, history: get_groq_response(text, history, "qwen/qwen3-32b")
+        'estimated_time': 9,  # секунды (70B параметров - большая)
+        'context_limit': 128000,  # токены (128K)
+        'function': lambda text, history: get_openrouter_response(text, history, "meta-llama/llama-3.3-70b-instruct")
     },
     
     # Yandex
@@ -1166,14 +1400,125 @@ MODELS = {
         'emoji': '🟣',
         'description': 'Русский ИИ от Яндекса',
         'category': 'yandex',
+        'estimated_time': 5,  # секунды
+        'context_limit': 8000,  # токены (8K)
         'function': get_yandex_response
     }
 }
+
+def generate_chat_title(first_message, model_name):
+    """
+    Генерирует название чата на основе первого сообщения
+    """
+    # Обрезаем первое сообщение до 50 символов
+    if len(first_message) > 50:
+        title = first_message[:47] + "..."
+    else:
+        title = first_message
+    
+    return title
+
+def estimate_tokens(text):
+    """
+    Примерный расчет количества токенов в тексте
+    Эвристика: ~4 символа = 1 токен
+    """
+    return len(text) // 4
+
+def calculate_conversation_tokens(conversation_history):
+    """
+    Подсчитывает примерное количество токенов во всей истории разговора
+    """
+    total_tokens = 0
+    for message in conversation_history:
+        if 'text' in message:
+            total_tokens += estimate_tokens(message['text'])
+    return total_tokens
+
+def trim_conversation_to_limit(conversation_history, context_limit):
+    """
+    Обрезает историю разговора до указанного лимита токенов
+    Сохраняет последние сообщения, которые помещаются в лимит
+    """
+    if not conversation_history:
+        return conversation_history
+    
+    # Оставляем 20% запаса для системных промптов и ответа
+    effective_limit = int(context_limit * 0.8)
+    
+    # Идем с конца и собираем сообщения, пока не превысим лимит
+    trimmed = []
+    current_tokens = 0
+    
+    for message in reversed(conversation_history):
+        message_tokens = estimate_tokens(message.get('text', ''))
+        if current_tokens + message_tokens > effective_limit:
+            break
+        trimmed.insert(0, message)
+        current_tokens += message_tokens
+    
+    return trimmed
+
+async def show_thinking_indicator(context, message, model_name, estimated_time):
+    """
+    Показывает индикатор "печатает" без текстового сообщения
+    Возвращает None вместо сообщения и задачу для последующей отмены
+    """
+    import time
+    
+    start_time = time.time()
+    
+    # Сначала отправляем индикатор "печатает"
+    await context.bot.send_chat_action(
+        chat_id=message.chat_id,
+        action="typing"
+    )
+    
+    # Создаем фоновую задачу для постоянной отправки индикатора "печатает"
+    async def update_typing_indicator():
+        while True:
+            try:
+                # Ждем 4 секунды перед следующей отправкой (индикатор действует 5 секунд)
+                await asyncio.sleep(4)
+                
+                # Отправляем индикатор "печатает" снова
+                await context.bot.send_chat_action(
+                    chat_id=message.chat_id,
+                    action="typing"
+                )
+            except Exception as e:
+                # Ошибка или задача отменена
+                break
+    
+    # Запускаем обновление индикатора в фоне
+    timer_task = asyncio.create_task(update_typing_indicator())
+    
+    # Возвращаем None вместо сообщения, так как мы не создаем текстовое сообщение
+    return None, timer_task
+
+async def delete_thinking_indicator(thinking_msg, timer_task):
+    """
+    Останавливает индикатор "печатает"
+    """
+    try:
+        # Отменяем задачу обновления индикатора
+        timer_task.cancel()
+        try:
+            await timer_task
+        except asyncio.CancelledError:
+            pass
+        
+        # Удаляем сообщение (если оно было создано)
+        if thinking_msg is not None:
+            await thinking_msg.delete()
+    except Exception as e:
+        logging.warning(f"Не удалось остановить индикатор: {e}")
 
 def get_main_keyboard():
     """Создает основную клавиатуру с командами"""
     keyboard = [
         [KeyboardButton("💬 Создать новый чат"), KeyboardButton("📂 Ваши чаты")],
+        [KeyboardButton("🎨 Генерация фото/видео")],
         [KeyboardButton("👥 Группы"), KeyboardButton("📊 Статус")],
         [KeyboardButton("❓ Помощь")]
     ]
@@ -1410,9 +1755,7 @@ async def start(update: Update, context):
 🤖 **Модель:** {MODELS[group_info['model_id']]['name']}
 👥 **Участников:** {len(group_info['members'])}/5
 
-Теперь можете писать сообщения - все участники увидят их!
-
-Выберите действие:"""
+Теперь можете писать сообщения - все участники увидят их!"""
             
             # Inline-кнопки управления группой
             if is_creator:
@@ -1436,7 +1779,7 @@ async def start(update: Update, context):
             
             await context.bot.send_message(
                 chat_id=user_id,
-                text="Выберите действие:",
+                text="👇 Используйте кнопки ниже",
                 reply_markup=reply_keyboard
             )
             return
@@ -1469,7 +1812,7 @@ async def start(update: Update, context):
             
             await context.bot.send_message(
                 chat_id=user_id,
-                text="Выберите действие:",
+                text="👇 Используйте кнопки ниже",
                 reply_markup=reply_keyboard
             )
             
@@ -1731,9 +2074,9 @@ async def my_chats_command(update: Update, context):
         title = chat_data.get('title', 'Новый диалог')
         if not title:
             title = "Новый диалог"
-        model_name = chat_data.get('model_name', 'Неизвестно')
+        model_name = chat_data.get('model', 'Неизвестно')
         msg_count = chat_data.get('message_count', 0)
-        created = chat_data.get('created_at', '')[:10]
+        created = chat_data.get('created_at', '')
         
         chat_text = f"**{title}**\n\n"
         chat_text += f"🆔 `{chat_id}`\n"
@@ -2075,9 +2418,7 @@ async def groups_command(update: Update, context):
 • Совместная работа над задачами
 • До 5 участников в одной группе
 
-📊 **У вас:** {groups_count} {"группа" if groups_count == 1 else "групп" if groups_count < 5 else "групп"}
-
-👇 Выберите действие:"""
+📊 **У вас:** {groups_count} {"группа" if groups_count == 1 else "групп" if groups_count < 5 else "групп"}"""
     
     # Обычная клавиатура с кнопками
     buttons = []
@@ -2121,16 +2462,12 @@ async def newgroup_command(update: Update, context):
 
 👇 Выберите модель:"""
     
-    # Формируем inline-кнопки с моделями (все модели, кроме auto-select)
+    # Формируем inline-кнопки с моделями (все модели, как в веб-приложении)
     inline_keyboard = []
     
     # Группируем модели по 2 в ряд
     row = []
     for model_id, model_info in MODELS.items():
-        # Пропускаем auto-select, так как для группы нужна конкретная модель
-        if model_id == 'auto-select':
-            continue
-        
         button_text = f"{model_info['emoji']} {model_info['name']}"
         row.append(InlineKeyboardButton(button_text, callback_data=f"selectgroupmodel_{model_id}"))
         
@@ -2344,6 +2681,10 @@ async def handle_message(update: Update, context):
         first_name = update.effective_user.first_name or "Unknown"
         last_name = update.effective_user.last_name or ""
         
+        # Логирование для отладки дублирования
+        message_type = "web_app" if update.message.web_app_data else "text"
+        logging.info(f"handle_message вызвана для пользователя {user_id}, тип: {message_type}")
+        
         # Обновляем информацию о пользователе
         update_user_info(user_id, username, first_name, last_name)
         
@@ -2434,6 +2775,18 @@ async def handle_message(update: Update, context):
             await delete_service_messages(context, update.effective_chat.id, user_id)
             await my_chats_command(update, context)
             return
+        elif user_text == "🎨 Генерация фото/видео":
+            await update.message.reply_text(
+                "🎨 **Генерация фото/видео**\n\n"
+                "🚧 **Функция в разработке**\n\n"
+                "Скоро здесь будет возможность:\n"
+                "• 🖼️ Генерация изображений по описанию\n"
+                "• 🎬 Создание коротких видео\n"
+                "• 🎭 Стилизация и редактирование\n\n"
+                "Следите за обновлениями! ⚡",
+                reply_markup=get_main_keyboard()
+            )
+            return
         elif user_text == "👥 Группы":
             # Удаляем все предыдущие служебные сообщения
             await delete_service_messages(context, update.effective_chat.id, user_id)
@@ -2494,19 +2847,42 @@ async def handle_message(update: Update, context):
                     [KeyboardButton("◀️ Главное меню")]
                 ], resize_keyboard=True)
                 
-                await update.message.reply_text(groups_text, reply_markup=inline_markup)
+                # Отправляем сообщение с inline-кнопками групп
+                sent_msg = await update.message.reply_text(groups_text, reply_markup=inline_markup)
+                
+                # Сохраняем ID служебного сообщения
+                if user_id not in last_service_messages:
+                    last_service_messages[user_id] = []
+                last_service_messages[user_id].append(sent_msg.message_id)
                 
                 # Отправляем второе сообщение с обычной клавиатурой
-                await context.bot.send_message(
+                sent_msg2 = await context.bot.send_message(
                     chat_id=update.effective_chat.id,
-                    text="Используйте кнопки ниже:",
+                    text="👇 Используйте кнопки ниже для управления",
                     reply_markup=keyboard
                 )
+                
+                # Сохраняем ID служебного сообщения
+                last_service_messages[user_id].append(sent_msg2.message_id)
             return
         
         # ========================================
         # 👥 ОБРАБОТЧИКИ REPLY-КНОПОК ГРУПП
         # ========================================
+        elif user_text == "📂 Ваши чаты":
+            # В групповых чатах эта кнопка недоступна
+            if user_id in user_current_group:
+                await update.message.reply_text(
+                    "⚠️ **Эта функция недоступна в групповых чатах**\n\n"
+                    "\"Ваши чаты\" показывает только личные чаты с ботом.\n\n"
+                    "Выйдите из группового чата через \"◀️ Главное меню\", "
+                    "чтобы посмотреть свои личные чаты."
+                )
+            else:
+                # Если не в группе, обрабатываем как обычно
+                await delete_service_messages(context, update.effective_chat.id, user_id)
+                await my_chats_command(update, context)
+            return
         elif user_text == "📊 Инфо о группе":
             # Показываем информацию о текущей группе
             if user_id in user_current_group:
@@ -2700,11 +3076,28 @@ async def handle_message(update: Update, context):
                     model_id = user_models.get(user_id, 'unknown')
                     model_name = MODELS.get(model_id, {}).get('name', 'Unknown')
                     
+                    # Получаем первое сообщение пользователя для названия
+                    first_user_message = None
+                    for msg in user_conversations[user_id]:
+                        if msg.get('role') == 'user':
+                            first_user_message = msg.get('text', '')
+                            break
+                    
+                    # Генерируем название чата
+                    if first_user_message:
+                        chat_title = generate_chat_title(first_user_message, model_name)
+                    else:
+                        chat_title = f"{model_name} - {len(user_conversations[user_id])} сообщений"
+                    
+                    # Форматируем дату
+                    created_date = datetime.fromtimestamp(int(chat_id)).strftime('%Y-%m-%d %H:%M')
+                    
                     user_all_chats[user_id][chat_id] = {
                         'messages': user_conversations[user_id].copy(),
-                        'model': model_id,
-                        'created_at': chat_id,
-                        'title': f"{model_name} - {len(user_conversations[user_id])} сообщений",
+                        'model_id': model_id,
+                        'model': model_name,
+                        'created_at': created_date,
+                        'title': chat_title,
                         'message_count': len(user_conversations[user_id])
                     }
                     
@@ -2749,7 +3142,7 @@ async def handle_message(update: Update, context):
                             [KeyboardButton("◀️ Главное меню")]
                         ], resize_keyboard=True)
                     
-                    await update.message.reply_text("💬 **Групповой чат: " + group_info['title'] + "**\n\n🤖 **Модель:** " + MODELS[group_info['model_id']]['name'] + "\n👥 **Участников:** " + str(len(group_info['members'])) + "/5\n\nВыберите действие:", reply_markup=keyboard)
+                    await update.message.reply_text("💬 **Групповой чат: " + group_info['title'] + "**\n\n🤖 **Модель:** " + MODELS[group_info['model_id']]['name'] + "\n👥 **Участников:** " + str(len(group_info['members'])) + "/5", reply_markup=keyboard)
                 else:
                     keyboard = get_main_keyboard()
                     await update.message.reply_text("🏠 **Главное меню**", reply_markup=keyboard)
@@ -2871,8 +3264,59 @@ async def handle_message(update: Update, context):
             if user_id in user_current_group:
                 del user_current_group[user_id]
             
-            # Завершаем текущий чат, если он активен
-            await finalize_chat(user_id, username, context, update.effective_chat.id)
+            # Сохраняем текущий чат, если есть сообщения
+            if user_id in user_conversations and len(user_conversations[user_id]) > 0:
+                # Сохраняем чат в user_all_chats для "Мои чаты"
+                import time
+                chat_id = str(int(time.time()))
+                
+                if user_id not in user_all_chats:
+                    user_all_chats[user_id] = {}
+                
+                # Получаем название модели
+                model_id = user_models.get(user_id, 'unknown')
+                model_name = MODELS.get(model_id, {}).get('name', 'Unknown')
+                
+                # Получаем первое сообщение пользователя для названия
+                first_user_message = None
+                for msg in user_conversations[user_id]:
+                    if msg.get('role') == 'user':
+                        first_user_message = msg.get('text', '')
+                        break
+                
+                # Генерируем название чата
+                if first_user_message:
+                    chat_title = generate_chat_title(first_user_message, model_name)
+                else:
+                    chat_title = f"{model_name} - {len(user_conversations[user_id])} сообщений"
+                
+                # Форматируем дату
+                created_date = datetime.fromtimestamp(int(chat_id)).strftime('%Y-%m-%d %H:%M')
+                
+                user_all_chats[user_id][chat_id] = {
+                    'messages': user_conversations[user_id].copy(),
+                    'model_id': model_id,
+                    'model': model_name,
+                    'created_at': created_date,
+                    'title': chat_title,
+                    'message_count': len(user_conversations[user_id])
+                }
+                
+                # Сохраняем в файл
+                save_user_chats(user_id, username)
+                logging.info(f"Чат {chat_id} сохранен для пользователя {user_id}")
+                
+                # Очищаем текущий чат
+                del user_conversations[user_id]
+                
+                await update.message.reply_text(
+                    "💾 **Чат сохранен**\n\n"
+                    "Вы можете продолжить его позже через \"📂 Ваши чаты\""
+                )
+            else:
+                # Пустой чат не сохраняем
+                if user_id in user_conversations:
+                    del user_conversations[user_id]
             
             # Удаляем сообщение с кнопкой и список моделей
             try:
@@ -2886,7 +3330,7 @@ async def handle_message(update: Update, context):
             keyboard = get_main_keyboard()
             sent_msg = await context.bot.send_message(
                 chat_id=update.effective_chat.id,
-                text="📋 **Главное меню**\n\nВыберите действие:",
+                text="📋 **Главное меню**",
                 reply_markup=keyboard
             )
             
@@ -2902,28 +3346,37 @@ async def handle_message(update: Update, context):
             group_info = get_group_info(group_id)
             
             if group_info:
-                # Показываем индикатор "печатает..."
-                await update.message.chat.send_action(action="typing")
-                
                 # Инициализируем историю группы
                 if group_id not in group_conversations:
                     group_conversations[group_id] = []
                 
-                # Получаем ответ от модели группы
+                # Получаем информацию о модели группы
                 model_id = group_info['model_id']
                 model_info = MODELS.get(model_id)
+                model_name = model_info['name']
+                estimated_time = model_info.get('estimated_time', 5)  # По умолчанию 5 секунд
                 
-                # Формируем историю для AI (только последние 40 сообщений)
+                # Показываем индикатор размышления с таймером
+                thinking_msg, timer_task = await show_thinking_indicator(context, update.message, model_name, estimated_time)
+                
+                # Формируем историю для AI
                 conversation_history = []
-                for entry in group_conversations[group_id][-40:]:
+                for entry in group_conversations[group_id]:
                     if 'user_message' in entry:
                         conversation_history.append({'role': 'user', 'text': entry['user_message']})
                     if 'ai_response' in entry:
                         conversation_history.append({'role': 'assistant', 'text': entry['ai_response']})
                 
+                # Обрезаем историю до лимита контекста модели
+                context_limit = model_info.get('context_limit', 128000)
+                conversation_history = trim_conversation_to_limit(conversation_history, context_limit)
+                
                 # Получаем ответ от AI
                 model_func = model_info['function']
                 response = model_func(user_text, conversation_history)
+                
+                # Удаляем индикатор размышления
+                await delete_thinking_indicator(thinking_msg, timer_task)
                 
                 # Сохраняем в историю группы
                 group_conversations[group_id].append({
@@ -2945,32 +3398,40 @@ async def handle_message(update: Update, context):
                 except Exception:
                     group_response = f"👤 **@{username}:** {user_text}\n\n🤖 **AI:** {response}"
                 
+                # Создаем клавиатуру для группового чата
+                group_keyboard = ReplyKeyboardMarkup([
+                    [KeyboardButton("◀️ Главное меню")]
+                ], resize_keyboard=True)
+                
                 # Отправляем ответ всем участникам группы
                 for member_id in group_info['members']:
                     try:
                         if member_id == user_id:
-                            # Отправителю отправляем как ответ на его сообщение
+                            # Отправителю отправляем как ответ на его сообщение с клавиатурой
                             await update.message.reply_text(
                                 group_response,
-                                parse_mode="Markdown"
+                                parse_mode="Markdown",
+                                reply_markup=group_keyboard
                             )
                         else:
-                            # Остальным участникам отправляем отдельным сообщением
+                            # Остальным участникам отправляем отдельным сообщением с клавиатурой
                             await context.bot.send_message(
                                 chat_id=member_id,
                                 text=f"💬 **Группа: {group_info['title']}**\n\n{group_response}",
-                                parse_mode="Markdown"
+                                parse_mode="Markdown",
+                                reply_markup=group_keyboard
                             )
                     except Exception as e:
                         logging.error(f"Ошибка отправки сообщения участнику {member_id}: {e}")
                         # Если не удалось с Markdown, пробуем без него
                         try:
                             if member_id == user_id:
-                                await update.message.reply_text(group_response)
+                                await update.message.reply_text(group_response, reply_markup=group_keyboard)
                             else:
                                 await context.bot.send_message(
                                     chat_id=member_id,
-                                    text=f"💬 Группа: {group_info['title']}\n\n{group_response}"
+                                    text=f"💬 Группа: {group_info['title']}\n\n{group_response}",
+                                    reply_markup=group_keyboard
                                 )
                         except:
                             pass
@@ -2997,16 +3458,23 @@ async def handle_message(update: Update, context):
         if user_id not in user_conversations:
             user_conversations[user_id] = []
         
-        # Показываем индикатор "печатает..."
-        await update.message.chat.send_action(action="typing")
-        
         # Логируем сообщение пользователя
         log_user_message(user_id, username, user_text, is_bot=False)
         
-        # Получаем ответ от выбранной модели с историей
+        # Получаем информацию о модели
         model_info = MODELS.get(user_models[user_id])
+        model_name = model_info['name']
+        estimated_time = model_info.get('estimated_time', 5)  # По умолчанию 5 секунд
+        
+        # Показываем индикатор размышления с таймером
+        thinking_msg, timer_task = await show_thinking_indicator(context, update.message, model_name, estimated_time)
+        
+        # Получаем ответ от выбранной модели с историей
         model_func = model_info['function']
         response = model_func(user_text, user_conversations[user_id])
+        
+        # Удаляем индикатор размышления
+        await delete_thinking_indicator(thinking_msg, timer_task)
         
         # Логируем ответ бота
         log_user_message(user_id, username, response, is_bot=True)
@@ -3015,9 +3483,9 @@ async def handle_message(update: Update, context):
         user_conversations[user_id].append({'role': 'user', 'text': user_text})
         user_conversations[user_id].append({'role': 'assistant', 'text': response})
         
-        # Ограничиваем историю последними 40 сообщениями (20 пар вопрос-ответ)
-        if len(user_conversations[user_id]) > 40:
-            user_conversations[user_id] = user_conversations[user_id][-40:]
+        # Ограничиваем историю на основе лимита контекста модели
+        context_limit = model_info.get('context_limit', 128000)  # По умолчанию 128K токенов
+        user_conversations[user_id] = trim_conversation_to_limit(user_conversations[user_id], context_limit)
         
         # Форматируем и отправляем ответ с обработкой ошибок форматирования
         # НЕ передаем reply_markup, чтобы клавиатура не открывалась автоматически
@@ -3034,6 +3502,8 @@ async def handle_message(update: Update, context):
             # Если форматирование не удалось, отправляем без форматирования
             logging.warning(f"Ошибка форматирования Markdown: {format_error}")
         await update.message.reply_text(response)
+        
+        logging.info(f"handle_message завершена для пользователя {user_id}")
         
     except Exception as e:
         logging.error(f"Ошибка при обработке сообщения: {e}")
@@ -3109,7 +3579,7 @@ async def handle_callback_query(update: Update, context):
         
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text="Выберите действие:",
+            text="👇 Используйте кнопки ниже",
             reply_markup=reply_keyboard
         )
         
@@ -3128,9 +3598,7 @@ async def handle_callback_query(update: Update, context):
         # Возвращаем в меню групп
         groups_text = """👥 **Групповые чаты**
 
-Создавайте групповые чаты с друзьями и общайтесь с AI вместе!
-
-👇 Выберите действие:"""
+Создавайте групповые чаты с друзьями и общайтесь с AI вместе!"""
         
         # Обычная клавиатура с кнопками
         buttons = []
@@ -3176,9 +3644,7 @@ async def handle_callback_query(update: Update, context):
 🤖 **Модель:** {MODELS[group_info['model_id']]['name']}
 👥 **Участников:** {len(group_info['members'])}/5
 
-Теперь можете писать сообщения - все участники увидят их!
-
-Выберите действие:"""
+Теперь можете писать сообщения - все участники увидят их!"""
         
         # Inline-кнопки управления группой
         if is_creator:
@@ -3205,7 +3671,7 @@ async def handle_callback_query(update: Update, context):
         
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text="Выберите действие:",
+            text="👇 Используйте кнопки ниже",
             reply_markup=reply_keyboard
         )
         
@@ -3252,7 +3718,7 @@ async def handle_callback_query(update: Update, context):
         
         welcome_text = """🏠 **Главное меню**
 
-Группа успешно завершена. Выберите действие:"""
+Группа успешно завершена."""
         
         try:
             await context.bot.send_message(
@@ -3326,9 +3792,7 @@ async def handle_callback_query(update: Update, context):
 🤖 **Модель:** {MODELS[group_info['model_id']]['name']}
 👥 **Участников:** {len(group_info['members'])}/5
 
-Теперь можете писать сообщения - все участники увидят их!
-
-Выберите действие:"""
+Теперь можете писать сообщения - все участники увидят их!"""
         
         # Inline-кнопки управления группой
         if is_creator:
@@ -3421,16 +3885,16 @@ async def handle_callback_query(update: Update, context):
         keyboard = get_main_keyboard()
         
         try:
-            await query.message.edit_text("📋 **Главное меню**\n\nВыберите действие:")
+            await query.message.edit_text("📋 **Главное меню**")
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text="Используйте меню ниже:",
+                text="👇 Используйте кнопки ниже",
                 reply_markup=keyboard
             )
         except:
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
-                text="📋 **Главное меню**\n\nВыберите действие:",
+                text="📋 **Главное меню**",
                 reply_markup=keyboard
             )
         
@@ -3510,6 +3974,8 @@ async def error_handler(update, context):
     elif isinstance(error, NetworkError):
         logging.warning("Сетевая ошибка: Переподключение...")
 
+
+
 def main():
     """Основная функция запуска бота"""
     try:
@@ -3547,9 +4013,6 @@ def main():
         app.add_handler(CommandHandler("groupinfo", groupinfo_command))
         app.add_handler(CommandHandler("invite", invite_command))
         
-        # Команда для проверки доступных моделей Groq
-        app.add_handler(CommandHandler("groqmodels", groq_models_command))
-        
         # Загружаем групповые чаты
         load_group_chats()
         logging.info(f"📂 Загружено групповых чатов: {len(group_chats)}")
@@ -3572,6 +4035,8 @@ def main():
         app.add_error_handler(error_handler)
         
         logging.info("✅ Бот запущен и готов к работе!")
+        
+        # Запускаем бота
         app.run_polling(
             drop_pending_updates=True,
             bootstrap_retries=5

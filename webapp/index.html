@@ -50,6 +50,42 @@
             color: var(--tg-theme-text-color, #000000);
         }
 
+        .sort-container {
+            margin-top: 12px;
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .sort-select {
+            padding: 6px 10px;
+            border: 1px solid var(--tg-theme-hint-color, #cccccc);
+            border-radius: 16px;
+            font-size: 12px;
+            background-color: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            color: var(--tg-theme-hint-color, #888888);
+            cursor: pointer;
+            transition: all 0.2s;
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            padding-right: 28px;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 12 12'%3E%3Cpath fill='%23888888' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 8px center;
+            max-width: 180px;
+        }
+
+        .sort-select:hover {
+            border-color: var(--tg-theme-button-color, #0088cc);
+            color: var(--tg-theme-text-color, #000000);
+        }
+
+        .sort-select:focus {
+            outline: none;
+            border-color: var(--tg-theme-button-color, #0088cc);
+            box-shadow: 0 0 0 2px rgba(0, 136, 204, 0.15);
+        }
+
         .filter-container {
             display: flex;
             gap: 8px;
@@ -108,6 +144,7 @@
             transition: all 0.2s;
             border: 2px solid rgba(128, 128, 128, 0.2);
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            position: relative;
         }
 
         .model-card:hover {
@@ -120,6 +157,31 @@
             border-color: var(--tg-theme-button-color, #0088cc);
             background-color: var(--tg-theme-bg-color, #ffffff);
             box-shadow: 0 4px 20px rgba(0, 136, 204, 0.3);
+        }
+
+        .model-card.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background-color: rgba(128, 128, 128, 0.1);
+        }
+
+        .model-card.disabled:hover {
+            transform: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .soon-badge {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
         }
 
         .model-header {
@@ -154,8 +216,26 @@
         .model-description {
             font-size: 14px;
             color: var(--tg-theme-hint-color, #666666);
-            line-height: 1.5;
+            line-height: 1.6;
             margin-top: 8px;
+        }
+
+        .model-stats {
+            display: flex;
+            gap: 12px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .model-stat {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            color: var(--tg-theme-hint-color, #888888);
+            background-color: rgba(128, 128, 128, 0.1);
+            padding: 4px 10px;
+            border-radius: 8px;
         }
 
         .no-results {
@@ -217,6 +297,16 @@
         <div class="filter-container" id="filterContainer">
             <button class="filter-btn active" data-filter="all">Все</button>
         </div>
+
+        <div class="sort-container">
+            <select class="sort-select" id="sortSelect">
+                <option value="default">По умолчанию</option>
+                <option value="available">Активные</option>
+                <option value="free">Бесплатные</option>
+                <option value="popular">По популярности</option>
+                <option value="alphabet">По алфавиту</option>
+            </select>
+        </div>
     </div>
 
     <div class="models-grid" id="modelsGrid"></div>
@@ -234,164 +324,244 @@
         const models = {
             // AUTO-SELECT
             'auto-select': {
-                name: '🤖 Auto-Select',
-                emoji: '🎯',
-                description: 'Умный выбор лучшей модели для вашего запроса',
-                category: 'auto'
+                name: 'Auto-Select',
+                emoji: '🤖',
+                description: 'Автоматически выбирает оптимальную модель для вашего запроса. Использует умные алгоритмы для анализа сложности вопроса и подбора наилучшего AI.',
+                category: 'all',
+                available: true,
+                speed: 'Быстро',
+                context: '128K',
+                popularity: 100
             },
             
             // OpenAI GPT модели
             'gpt-5': {
                 name: 'GPT 5',
                 emoji: '🌟',
-                description: 'Новейшая GPT-5 от OpenAI',
-                category: 'openai'
+                description: 'Продвинутый модель OpenAI с улучшенным мышлением, мультимодальными возможностями (текст, изображение, видео) и повышенной эффективностью для сложных задач, таких как кодирование и анализ. Выпущен в начале 2025 года, предназначен для понимания на уровне человека.',
+                category: 'openai',
+                available: false,
+                speed: 'Быстро',
+                context: '1M',
+                popularity: 95
             },
             'gpt-5-nano': {
                 name: 'GPT 5 Nano',
                 emoji: '⚡',
-                description: 'Компактная версия GPT-5',
-                category: 'openai'
+                description: 'Компактная версия GPT-5, ориентированная на легковесный, эффективный вывод для мобильных/краевых устройств, с уменьшенными параметрами для более быстрого развертывания, сохраняя основные способности мышления.',
+                category: 'openai',
+                available: false,
+                speed: 'Очень быстро',
+                context: '128K',
+                popularity: 70
             },
             'gpt-4.1': {
                 name: 'GPT-4.1',
-                emoji: '🤖',
-                description: 'Улучшенная GPT-4',
-                category: 'openai'
+                emoji: '📺',
+                description: 'Обновленная итерация серии GPT-4 с уточнениями в точности, безопасности и возможностях тонкой настройки, ориентированная на корпоративные случаи использования, такие как кастомные агенты.',
+                category: 'openai',
+                available: false,
+                speed: 'Средне',
+                context: '128K',
+                popularity: 85
             },
             'gpt-4.1-mini': {
                 name: 'GPT-4.1 Mini',
                 emoji: '⚙️',
-                description: 'Быстрая GPT-4.1 Mini',
-                category: 'openai'
+                description: 'Миниатюрная версия GPT-4.1 для экономичных, быстрых задач, сохраняющая сильную производительность в чате и легком мышлении с меньшим количеством параметров.',
+                category: 'openai',
+                available: false,
+                speed: 'Очень быстро',
+                context: '128K',
+                popularity: 80
             },
             'gpt-4o': {
                 name: 'GPT-4o',
                 emoji: '💫',
-                description: 'Оптимизированная GPT-4o',
-                category: 'openai'
+                description: 'Универсальный модель OpenAI, превосходный в мультимодальных входах (текст, аудио), с сильной производительностью в креативных и аналитических задачах.',
+                category: 'openai',
+                available: false,
+                speed: 'Быстро',
+                context: '128K',
+                popularity: 98
             },
             'gpt-4o-mini': {
                 name: 'GPT-4o Mini',
                 emoji: '🔷',
-                description: 'Быстрая GPT-4o Mini',
-                category: 'openai'
+                description: 'Быстрая и эффективная версия GPT-4o. Идеальна для чат-ботов, быстрых консультаций и обработки больших объемов запросов.',
+                category: 'openai',
+                available: false,
+                speed: 'Очень быстро',
+                context: '128K',
+                popularity: 92
             },
             'gpt-4-turbo': {
                 name: 'GPT-4 Turbo',
                 emoji: '💨',
-                description: 'Быстрая GPT-4 Turbo',
-                category: 'openai'
+                description: 'Турбо-режим GPT-4 с расширенным контекстом. Обрабатывает большие документы и сложные задачи с высокой скоростью.',
+                category: 'openai',
+                available: false,
+                speed: 'Очень быстро',
+                context: '128K',
+                popularity: 90
             },
             
             // DeepSeek модели
-            'deepseek-r1': {
+            'deepseek-r1-free': {
                 name: 'DeepSeek R1',
                 emoji: '🧠',
-                description: 'Reasoning модель от DeepSeek',
-                category: 'deepseek'
+                description: 'Модель DeepSeek, ориентированная на мышление. Специализируется на логических рассуждениях, математике и решении сложных задач с пошаговым анализом.',
+                category: 'deepseek',
+                available: false,
+                speed: 'Быстро',
+                context: '64K',
+                popularity: 65,
+                isFree: true
             },
-            'deepseek-v3': {
+            'deepseek-v3-0324-free': {
                 name: 'DeepSeek V3',
                 emoji: '🔮',
-                description: 'Мощная модель DeepSeek V3',
-                category: 'deepseek'
+                description: 'Флагманская модель DeepSeek третьего поколения. Превосходная производительность в программировании, анализе данных и технических задачах.',
+                category: 'deepseek',
+                available: false,
+                speed: 'Быстро',
+                context: '64K',
+                popularity: 70,
+                isFree: true
             },
             
             // Google Gemini модели
             'gemini-2.5-pro': {
                 name: 'Gemini 2.5 Pro',
                 emoji: '💎',
-                description: 'Топовая Gemini с большим контекстом',
-                category: 'google'
+                description: 'Топовая модель Google Gemini с огромным окном контекста до 2M токенов. Мультимодальная обработка, глубокий анализ документов и кода.',
+                category: 'google',
+                available: false,
+                speed: 'Быстро',
+                context: '2M',
+                popularity: 85
             },
             'gemini-2.5-flash': {
                 name: 'Gemini 2.5 Flash',
                 emoji: '✨',
-                description: 'Быстрая Gemini 2.5 Flash',
-                category: 'google'
+                description: 'Сверхбыстрая версия Gemini 2.5. Молниеносные ответы при сохранении высокого качества. Отлично для реал-тайм приложений.',
+                category: 'google',
+                available: false,
+                speed: 'Очень быстро',
+                context: '1M',
+                popularity: 80
             },
             
             // Qwen модели
-            'qwen-3': {
+            'qwen-3-235b-a22b-free': {
                 name: 'Qwen 3',
                 emoji: '🐉',
-                description: 'Мощная китайская модель Qwen 3',
-                category: 'qwen'
+                description: 'Мощная открытая модель от Alibaba Cloud. Отличные результаты в понимании контекста, программировании и многоязычных задачах.',
+                category: 'qwen',
+                available: false,
+                speed: 'Быстро',
+                context: '128K',
+                popularity: 60,
+                isFree: true
             },
-            'qwen-3-thinking': {
+            'qwen-3-235b-a22b-thinking-2507': {
                 name: 'Qwen 3 Thinking',
                 emoji: '🧩',
-                description: 'Reasoning версия Qwen 3',
-                category: 'qwen'
-            },
-            'qwen3-32b': {
-                name: 'Qwen 3 32B',
-                emoji: '🐉',
-                description: 'Мощная модель Qwen 3 32B через Groq',
-                category: 'qwen'
+                description: 'Рассуждающая-версия Qwen 3 с расширенными возможностями логического мышления. Показывает процесс размышления над задачей.',
+                category: 'qwen',
+                available: false,
+                speed: 'Средне',
+                context: '128K',
+                popularity: 55
             },
             
             // Anthropic Claude модели
             'claude-4.5-sonnet': {
                 name: 'Claude 4.5 Sonnet',
                 emoji: '🎭',
-                description: 'Топовый Claude 4.5 Sonnet от Anthropic',
-                category: 'claude'
+                description: 'Флагманская модель Anthropic с исключительными способностями в анализе, творческом письме и детальном рассуждении. Лучший выбор для сложных задач.',
+                category: 'claude',
+                available: false,
+                speed: 'Средне',
+                context: '200K',
+                popularity: 90
             },
             'claude-3.5-haiku': {
                 name: 'Claude 3.5 Haiku',
                 emoji: '🎨',
-                description: 'Быстрый Claude 3.5 Haiku',
-                category: 'claude'
+                description: 'Быстрая и эффективная версия Claude. Сохраняет высокое качество при минимальной задержке. Идеальна для чатов и быстрых консультаций.',
+                category: 'claude',
+                available: false,
+                speed: 'Очень быстро',
+                context: '200K',
+                popularity: 85
             },
             
             // xAI Grok модели
             'grok-4': {
                 name: 'Grok 4',
                 emoji: '🚀',
-                description: 'Новейший Grok 4 от xAI',
-                category: 'grok'
+                description: 'Новейший Grok 4 от xAI. Обучен на данных X (Twitter) с доступом к реальному времени. Уникальный стиль общения и актуальная информация.',
+                category: 'grok',
+                available: false,
+                speed: 'Быстро',
+                context: '128K',
+                popularity: 75
             },
             'grok-3': {
                 name: 'Grok 3',
                 emoji: '🎯',
-                description: 'Grok 3 от Илона Маска',
-                category: 'grok'
+                description: 'Grok 3 от xAI с уникальным чувством юмора и способностью к критическому мышлению. Доступ к актуальным данным из соцсетей.',
+                category: 'grok',
+                available: false,
+                speed: 'Быстро',
+                context: '128K',
+                popularity: 70
             },
             'grok-4-fast': {
                 name: 'Grok 4 Fast',
                 emoji: '⚡',
-                description: 'Быстрый Grok 4 (2M контекст!)',
-                category: 'grok'
+                description: 'Оптимизированный по скорости вариант Grok 4 для быстрых ответов в сценариях высокого трафика.',
+                category: 'grok',
+                available: false,
+                speed: 'Очень быстро',
+                context: '2M',
+                popularity: 65
             },
-            'grok-code-fast': {
+            'grok-code-fast-1': {
                 name: 'Grok Code Fast',
                 emoji: '💻',
-                description: 'Grok для программирования',
-                category: 'grok'
+                description: 'Специализированная версия Grok для программирования. Отличное понимание кода, debugging и архитектурных решений.',
+                category: 'grok',
+                available: false,
+                speed: 'Очень быстро',
+                context: '128K',
+                popularity: 60
             },
             
             // Groq (быстрые модели)
-            'llama-3.1-8b': {
-                name: 'Llama 3.1 8B',
+            'llama-3.3-70b-instruct': {
+                name: 'Llama 3.3',
                 emoji: '🦙',
-                description: 'Быстрая Llama 3.1 8B через Groq',
-                category: 'groq'
-            },
-            'gpt-oss-120b': {
-                name: 'GPT OSS 120B',
-                emoji: '🚀',
-                description: 'Мощная модель GPT OSS 120B через Groq',
-                category: 'groq'
+                description: 'Модель с открытым исходным кодом от Meta с улучшенной эффективностью, многоязычной поддержкой и легкостью тонкой настройки для кастомных приложений.',
+                category: 'groq',
+                available: false,
+                speed: 'Быстро',
+                context: '128K',
+                popularity: 75
             },
             
             // Yandex
             'yandex-gpt': {
                 name: 'Yandex GPT',
                 emoji: '🟣',
-                description: 'Русский ИИ от Яндекса',
-                category: 'yandex'
+                description: 'Российская языковая модель от Яндекса. Превосходное понимание русского языка, культурного контекста и локальных особенностей.',
+                category: 'yandex',
+                available: true,
+                speed: 'Средне',
+                context: '8K',
+                popularity: 50,
+                isFree: true
             }
         };
 
@@ -410,6 +580,7 @@
         let selectedModel = null;
         let currentFilter = 'all';
         let searchQuery = '';
+        let currentSort = 'default';
 
         // Создаем фильтры
         function createFilters() {
@@ -440,13 +611,31 @@
             const grid = document.getElementById('modelsGrid');
             grid.innerHTML = '';
 
-            const filteredModels = Object.entries(models).filter(([id, model]) => {
+            let filteredModels = Object.entries(models).filter(([id, model]) => {
                 const matchesFilter = currentFilter === 'all' || model.category === currentFilter;
                 const matchesSearch = searchQuery === '' || 
                     model.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                     model.description.toLowerCase().includes(searchQuery.toLowerCase());
+                
+                // Фильтр "Активные" из селекта
+                if (currentSort === 'available') {
+                    return matchesFilter && matchesSearch && model.available;
+                }
+                
+                // Фильтр "Бесплатные" из селекта
+                if (currentSort === 'free') {
+                    return matchesFilter && matchesSearch && model.isFree === true;
+                }
+                
                 return matchesFilter && matchesSearch;
             });
+
+            // Применяем сортировку
+            if (currentSort === 'popular') {
+                filteredModels.sort((a, b) => b[1].popularity - a[1].popularity);
+            } else if (currentSort === 'alphabet') {
+                filteredModels.sort((a, b) => a[1].name.localeCompare(b[1].name));
+            }
 
             if (filteredModels.length === 0) {
                 grid.innerHTML = `
@@ -467,11 +656,19 @@
                     card.classList.add('special');
                 }
                 
+                // Добавляем класс для неработающих моделей
+                if (!model.available) {
+                    card.classList.add('disabled');
+                }
+                
                 if (selectedModel === id) {
                     card.classList.add('selected');
                 }
                 
+                const soonBadge = !model.available ? '<div class="soon-badge">SOON</div>' : '';
+                
                 card.innerHTML = `
+                    ${soonBadge}
                     <div class="model-header">
                         <div class="model-emoji">${model.emoji}</div>
                         <div class="model-info">
@@ -480,9 +677,24 @@
                         </div>
                     </div>
                     <div class="model-description">${model.description}</div>
+                    <div class="model-stats">
+                        <span class="model-stat">⚡ ${model.speed}</span>
+                        <span class="model-stat">📊 ${model.context}</span>
+                        <span class="model-stat">🔥 ${model.popularity}%</span>
+                    </div>
                 `;
                 
-                card.onclick = () => selectModel(id);
+                // Для неработающих моделей блокируем клик
+                if (model.available) {
+                    card.onclick = () => selectModel(id);
+                } else {
+                    card.onclick = () => {
+                        if (tg.HapticFeedback) {
+                            tg.HapticFeedback.notificationOccurred('error');
+                        }
+                    };
+                }
+                
                 grid.appendChild(card);
             });
         }
@@ -505,6 +717,12 @@
         // Поиск
         document.getElementById('searchInput').addEventListener('input', (e) => {
             searchQuery = e.target.value;
+            renderModels();
+        });
+
+        // Сортировка
+        document.getElementById('sortSelect').addEventListener('change', (e) => {
+            currentSort = e.target.value;
             renderModels();
         });
 
